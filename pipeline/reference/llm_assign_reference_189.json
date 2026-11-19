@@ -1,0 +1,27 @@
+{
+  "_about": "Reference answers for the LLM assignment step, Vatican Museums (189) leftover topics, judged by hand on 28 Oct 2026. Use as an eval set for the production prompt.",
+  "assignments": [
+    {"topic": 3,  "decision": "existing", "cluster": "Vatican Museums Tickets & Entry", "languages": ["de"], "note": "vatikan tickets"},
+    {"topic": 2,  "decision": "existing", "cluster": "Sistine Chapel Tickets & Tours", "languages": ["es"], "note": "capilla sixtina entradas"},
+    {"topic": 4,  "decision": "existing", "cluster": "Sistine Chapel Tickets & Tours", "languages": ["de"], "note": "sixtinische kapelle tickets"},
+    {"topic": 0,  "decision": "existing", "cluster": "Vatican Museums Tickets & Entry", "languages": ["pl", "de", "he", "ro"], "note": "mixed; one St Peter's dome term"},
+    {"topic": 17, "decision": "existing", "cluster": "Sistine Chapel Tickets & Tours", "languages": ["de"], "note": "eintritt = entry"},
+    {"topic": 1,  "decision": "new", "cluster": "Official site", "languages": ["es", "it"], "note": "pagina oficial / sito ufficiale"},
+    {"topic": 12, "decision": "new", "cluster": "Official site", "languages": ["domain"], "note": "museivaticani.va typed as a search"},
+    {"topic": 13, "decision": "new", "cluster": "Official site", "languages": ["domain", "hu", "pl"], "note": "mostly the museivaticani.va domain"},
+    {"topic": 6,  "decision": "existing", "cluster": "Sistine Chapel Tickets & Tours", "languages": ["es", "de"], "note": "Vatican + Sistine tickets; EOS keeps 'vatican museums and sistine chapel tickets' here"},
+    {"topic": 5,  "decision": "existing", "cluster": "Vatican Museums Tickets & Entry", "languages": ["fr", "it", "pt"], "note": ""},
+    {"topic": 7,  "decision": "existing", "cluster": "Vatican Museums Tickets & Entry", "languages": ["ru", "pl", "ja", "de"], "note": ""},
+    {"topic": 11, "decision": "existing", "cluster": "Guided Tours (Vatican Museums)", "languages": ["de", "he"], "note": "vatikan führung / besichtigen"},
+    {"topic": 10, "decision": "other_ce", "cluster": "St Peter's Basilica", "languages": ["de"], "note": "standalone St Peter's demand; owner CE to confirm, else Combo"},
+    {"topic": 14, "decision": "existing", "cluster": "Sistine Chapel Tickets & Tours", "languages": ["es", "hu", "fr"], "note": ""},
+    {"topic": 9,  "decision": "existing", "cluster": "Dress Code, Rules & Restrictions", "languages": ["es", "nl", "fr"], "note": "$6 spend, 0 conversions: organic/content value only"},
+    {"topic": 8,  "decision": "noise", "cluster": null, "languages": ["zh", "fr"], "note": "Chinese Vatican tickets mixed with generic 'rome tours'; split by hand"},
+    {"topic": 18, "decision": "existing", "cluster": "Guided Tours (Vatican Museums)", "languages": ["de", "pl", "he"], "note": ""},
+    {"topic": 19, "decision": "new", "cluster": "Official site", "languages": ["fr", "es"], "note": "site officiel / sitio oficial"},
+    {"topic": 15, "decision": "new", "cluster": "Guided tours in your language", "languages": ["de"], "note": "führung deutsch; could be an attribute of Guided Tours instead"},
+    {"topic": 16, "decision": "new", "cluster": "Guided tours in your language", "languages": ["es", "fr", "ja"], "note": "mixed with St Peter's terms"},
+    {"topic": 21, "decision": "existing", "cluster": "Vatican Museums Tickets & Entry", "languages": ["fi", "ru"], "note": "mixed Vatican/Sistine"},
+    {"topic": 20, "decision": "existing", "cluster": "Sistine Chapel Tickets & Tours", "languages": ["de"], "note": ""}
+  ]
+}

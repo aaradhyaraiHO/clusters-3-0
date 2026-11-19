@@ -1,0 +1,111 @@
+{
+  "window": {
+    "start": "2026-07-30",
+    "end": "2026-10-27",
+    "label": "30 Jul – 27 Oct 2026"
+  },
+  "ces": {
+    "189": {
+      "slug": "vatican",
+      "name": "Vatican Museums",
+      "host": "www.thevaticantickets.com",
+      "out": "hybrid",
+      "data": "vatican.json",
+      "page": "vatican-clusters.html",
+      "title": "Vatican Clusters",
+      "legacy": true
+    },
+    "3945": {
+      "slug": "milford",
+      "name": "Milford Sound Cruises",
+      "host": "www.milford-sound-cruises.co.nz",
+      "out": "hybrid_milford",
+      "data": "milford.json",
+      "page": "milford-clusters.html",
+      "title": "Milford Sound Clusters",
+      "snapshot": "20261102_milford_full",
+      "runs": {
+        "pairs": "20261102-181325_mapping_20261102_milford_full",
+        "organic": "20261102-181342_mapping_20261102_milford_full",
+        "keywords": "20261102-181630_mapping_20261102_milford_full"
+      },
+      "name_words": [
+        "milford",
+        "sound",
+        "sounds",
+        "nz",
+        "new",
+        "zealand"
+      ]
+    },
+    "325": {
+      "slug": "parkguell",
+      "name": "Park Güell",
+      "host": "www.parkguell-tickets.com",
+      "out": "hybrid_parkguell",
+      "data": "parkguell.json",
+      "page": "parkguell-clusters.html",
+      "title": "Park Güell Clusters",
+      "snapshot": "20261030_parkguell_full",
+      "runs": {
+        "pairs": "20261106-081100_mapping_20261030_parkguell_full",
+        "organic": "20261106-081112_mapping_20261030_parkguell_full",
+        "keywords": "20261106-081117_mapping_20261030_parkguell_full"
+      },
+      "name_words": [
+        "park",
+        "parc",
+        "parque",
+        "parco",
+        "guell",
+        "güell",
+        "gaudi",
+        "barcelona"
+      ],
+      "head": "Park Güell"
+    },
+    "2743": {
+      "slug": "greatbarrierreef",
+      "name": "Great Barrier Reef Cruises",
+      "host": "www.explore-great-barrier-reef.com",
+      "out": "hybrid_greatbarrierreef",
+      "data": "greatbarrierreef.json",
+      "page": "greatbarrierreef-clusters.html",
+      "title": "Great Barrier Reef Cruises Clusters",
+      "name_words": [
+        "barrier",
+        "great",
+        "reef"
+      ],
+      "snapshot": "20261030_greatbarrierreefcrui_full",
+      "runs": {
+        "pairs": "20261119-022806_mapping_20261030_greatbarrierreefcrui_full",
+        "organic": "20261119-022813_mapping_20261030_greatbarrierreefcrui_full",
+        "keywords": "20261119-022817_mapping_20261030_greatbarrierreefcrui_full"
+      },
+      "head": "Great Barrier Reef"
+    },
+    "1695": {
+      "slug": "sydneywhalewatching",
+      "name": "Sydney Whale Watching Cruises",
+      "host": "www.tickets-sydney.com",
+      "out": "hybrid_sydneywhalewatching",
+      "data": "sydneywhalewatching.json",
+      "page": "sydneywhalewatching-clusters.html",
+      "title": "Sydney Whale Watching Cruises Clusters",
+      "name_words": [
+        "sydney",
+        "watching",
+        "whale"
+      ],
+      "snapshot": "final_sydneywhalewatching",
+      "runs": {
+        "pairs": "20261119-135624_final_pairs_1695",
+        "organic": "20261119-135624_final_organic_1695",
+        "keywords": "20261119-135624_final_keywords_1695"
+      },
+      "clusters_from": "snapshots/ce_1695/final (original prompt)",
+      "head": "Sydney Whale Watching"
+    }
+  }
+}

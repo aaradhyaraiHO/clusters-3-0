@@ -1,0 +1,845 @@
+"""Build the mockup's data from the hybrid cluster set (arm_hybrid_eos_v5): hybrid/vatican.json (one row per cluster),
+hybrid/drawer.json (each cluster's evidence) and hybrid/impression_share.json.
+
+Usage: python3 export_hybrid.py <clusters_3_0 dir that holds runs/, snapshots/ and .env-clusters/workbook/> [ce]
+Any CE other than 189 reads its folder from ces.json, filled by pull_ce.py, map_ce.py and prepare_ce.py (ADDING_A_CE.md),
+and its mapping runs from pipeline_local/; inputs Vatican alone has (Satvik's workbook, the cluster_sources run) are
+left empty for it.
+
+Paid numbers are Google Ads keyword totals spread over clusters by the searches each keyword served (the analytics
+session's capture method), so they reconcile with the account. Products and Headout entities come from the
+cluster_sources run on the hybrid set; pages from hybrid/pages_189.csv (map_hybrid_pages.py). CE-level totals still
+come from the v3_rebuilt export (vatican.json).
+"""
+import json
+import re
+import unicodedata
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+HERE = Path(__file__).resolve().parent
+ROOT = Path(sys.argv[1])
+CE = int(sys.argv[2]) if len(sys.argv) > 2 else 189
+COL, NAME = "D0.85", "D_name"
+MONTHS = 3
+TOP_SEARCHES = 150
+WB = ROOT / ".env-clusters" / "workbook"
+V4 = ROOT / "snapshots" / "20261028_v4_connected"
+HSNAP = ROOT / "snapshots" / "20261029_hybrid_sources"
+if CE == 189:
+    OUT, RUNS, HOST, DATA = HERE / "hybrid", ROOT / "runs", "www.thevaticantickets.com", "vatican.json"
+    # Jev places searches into the validated Vatican set (hybrid_11ce_v2 keywords): the 34 hybrid clusters plus five added ones (Vatican City,
+    # St Peter's Basilica, Pope & papal events, Castel Gandolfo, Brand & trust). Its runs cover capture_v2's exact term
+    # lists; paid and keyword runs have no confidence cut, organic is cut at 0.5.
+    CLUSTERS = ROOT / "snapshots" / "20261103_hybrid_11ce_v2" / "cluster_keywords.csv"
+    SNAP = ROOT / "snapshots" / "20261029_capture_v2"
+    PAIR_RUN = "20261103-171359_jev_classify_20261030_validation_v1"
+    ORGANIC_RUN = "20261103-171421_jev_classify_20261030_validation_v1"
+    KEYWORD_RUN = "20261103-171403_jev_classify_20261030_validation_v1"
+    SOURCES = ROOT / "runs" / "20261029-153401_cluster_sources_20261029_hybrid_sources" / "outputs"
+    PAGES, LANDING = HERE / "hybrid" / "pages_189.csv", HERE / "landing_pages.csv"
+else:
+    # Every other CE is set up the same way, from ces.json: pull_ce.py, map_ce.py and prepare_ce.py fill its folder.
+    CFG = json.loads((HERE / "ces.json").read_text())["ces"][str(CE)]
+    OUT, RUNS, HOST, DATA = HERE / CFG["out"], HERE / "pipeline_local" / "runs", CFG["host"], CFG["data"]
+    CLUSTERS = HERE / "pipeline_local" / "snapshots" / CFG["snapshot"] / "cluster_keywords.csv"
+    SNAP = OUT
+    PAIR_RUN, ORGANIC_RUN, KEYWORD_RUN = CFG["runs"]["pairs"], CFG["runs"]["organic"], CFG["runs"]["keywords"]
+    SOURCES = None
+    PAGES, LANDING = OUT / f"pages_mapped_{CE}.csv", OUT / "landing_pages.csv"
+SITE = HOST.replace("www.", "")
+# The head-term cluster: named "... Head Term" in Vatican's and Milford's sets, named in ces.json otherwise (Park Güell's is "Park Güell").
+HEAD_NAME = None if CE == 189 else CFG.get("head")
+MIN_TERM_CLICKS = 20
+
+norm = lambda s: " ".join(str(s).lower().split())
+r = lambda v, d=0: None if v is None or pd.isna(v) else round(float(v), d) if d else int(round(float(v)))
+
+
+def assign(run):
+    a = pd.read_csv(RUNS / run / "outputs" / f"assignments_{CE}.csv", low_memory=False)
+    # Jev runs carry how = jev / jev_failed and the class probability; the rules mapper writes E_how only for CEs with
+    # rules in ce_config, so elsewhere the label comes from its D0.85 steps.
+    if "how" in a and a["how"].astype(str).str.startswith("jev").any():
+        a["E_how"] = np.where(a[COL].notna(), "jev", "unmapped")
+    elif "E_how" not in a:
+        a["E_how"] = np.select([a["A"].notna(), a["B_raw"].where(a["score"] >= 0.7).notna()], ["identifier", "polyfuzz"],
+                               np.where(a[COL].notna(), "embedding", "unmapped"))
+    return a.assign(k=a["term"].map(norm))
+
+
+kw = pd.read_csv(CLUSTERS)
+kw = kw[kw["ce"] == CE].assign(k=lambda d: d["kw"].map(norm))
+names = kw.drop_duplicates("cid").set_index("cid")
+# Vatican carries CE totals and change log over from the v3_rebuilt export; Milford's come from its own pulls.
+if CE == 189:
+    v3 = json.load(open(HERE / "vatican.json"))
+else:
+    landed = pd.read_csv(OUT / f"orders_by_landing_{CE}.csv")
+    v3 = {"ce": {"id": str(CE), "name": CFG["name"], "host": HOST, "window": "30 Jul – 27 Oct 2026",
+                 "revenue": round(float(landed["sum_revenue_usd"].sum()), 2), "orders": int(landed["count_orders"].sum()),
+                 "banner": "Real: clusters and keywords (11-CE hybrid run), Google Ads search terms, keywords and ad groups (30 Jul – 27 Oct), "
+                           "orders, paid revenue traced by click, Mixpanel funnel, Payload pages and Search Console. Not loaded for "
+                           f"{CFG['name']}: Satvik's capture numbers, Headout entities. Pages map to clusters by meaning."}, "change_log": []}
+old = {c["id"]: c for c in v3.get("clusters", [])}
+old_by_name = {c["name"].lower(): c for c in old.values()}
+
+# Trust pages (about us, legal) carry no search intent; the page mapper still matches their focus keyword to something.
+hpages = pd.read_csv(PAGES, dtype={"collection_id": str})
+hpages = hpages[hpages["page_type"] != "Trust"].assign(path=lambda d: d["path"].fillna(""))
+hpages["url"] = HOST + "/" + hpages["path"]
+# Organic orders by the page they landed on. A Payload page serves every locale, so /de/sistine-chapel counts for
+# sistine-chapel; orders landing on headout.com rather than the microbrand map to no page and stay at CE level.
+landed_all = pd.read_csv(V4 / "orders_by_landing.csv" if CE == 189 else OUT / f"orders_by_landing_{CE}.csv").rename(
+    columns={"count_orders": "orders", "sum_revenue_usd": "revenue_usd"})
+org_land = landed_all[(landed_all["ce"].astype(str) == str(CE)) & (landed_all["channel_grouping"] == "Organic")
+                      & landed_all["landing_path"].str.startswith(HOST)].copy()
+org_land["key"] = (org_land["landing_path"].str[len(HOST):].str.strip("/")
+                   .str.replace(r"^[a-z]{2}(-[a-z]{2})?(/|$)", "", regex=True).str.strip("/"))
+org_by_page = org_land.groupby("key")[["orders", "revenue_usd"]].sum()
+hpages["org_orders"] = hpages["path"].str.strip("/").map(org_by_page["orders"]).fillna(0)
+hpages["org_revenue"] = hpages["path"].str.strip("/").map(org_by_page["revenue_usd"]).fillna(0)
+if SOURCES:
+    hsrc = pd.read_csv(SOURCES / f"cluster_sources_{CE}.csv").set_index("cid")
+    hsup = pd.read_csv(SOURCES / f"supply_{CE}.csv", dtype={"experience_id": str})
+    hent = pd.read_csv(SOURCES / f"entities_{CE}.csv", dtype={"entity_id": str})
+else:
+    hsrc = pd.DataFrame(columns=["entity_status"]).rename_axis("cid")
+    hsup = pd.DataFrame(columns=["cid", "experience_id", "experience_name", "live", "revenue_usd", "orders"])
+    hent = pd.DataFrame(columns=["cid", "entity_type", "entity_id", "name", "is_active"])
+
+# Pages tagged in Payload with a place (a POI, or a collection other than the CE's own) go to a cluster about that place
+# (Parag, 30 Oct: link by metadata, not text). Candidates are clusters whose Headout entities include the tag, or whose
+# name holds the tag's distinctive words; the text mapper's pick stands if it is one of them, else the candidate that
+# shares most words with the page path. Untagged pages keep the text mapping.
+ROOT_IDS = {"poi": {"1"}, "collection": {"189", "3945"}}
+tag_names = pd.read_csv(HERE / "hybrid" / "page_entities.csv", dtype=str).set_index(["entity_type", "entity_id"])["name"]
+TAG_GENERIC = {"the", "of", "city", "vatican", "museums", "museum", "milford", "sound", "tickets", "and", "palace", "apostolic"}
+# Trailing "s" dropped so a path's "peters" meets a name's "Peter's".
+tag_words = lambda t: {w[:-1] if len(w) > 4 and w.endswith("s") else w
+                       for w in re.split(r"[^a-z0-9]+", str(t).lower().replace("'s", "")) if len(w) > 2 and w not in TAG_GENERIC}
+real_cids = [c for c in names.index if not str(names.at[c, "name"]).startswith("Other")]
+cvol = kw.groupby("cid")["vol"].max()
+
+
+def page_tag(row):
+    poi = None if pd.isna(row.get("poi_id")) else str(row["poi_id"]).split(".")[0]
+    coll = None if pd.isna(row.get("collection_id")) else str(row["collection_id"]).split(".")[0]
+    if poi and poi not in ROOT_IDS["poi"]:
+        return "poi", poi
+    if coll and coll not in ROOT_IDS["collection"]:
+        return "collection", coll
+    return None
+
+
+def tag_cluster(row):
+    tag = page_tag(row)
+    if not tag:
+        return row["cid"], row.get("how"), None
+    name = tag_names.get(tag, "")
+    want = tag_words(name)
+    linked = set(hent.loc[(hent["entity_type"] == tag[0]) & (hent["entity_id"] == tag[1]), "cid"])
+    named = {c for c in real_cids if want and want <= tag_words(names.at[c, "name"])}
+    cands = (linked | named) & set(real_cids)
+    label = f"{'POI' if tag[0] == 'poi' else 'Collection'} {tag[1]}" + (f" · {name}" if name else "")
+    if not cands:
+        return row["cid"], row.get("how"), label
+    # Most words shared with the page path; then the cluster that is the place itself (no other words in its name);
+    # then the text mapper's pick; then the fewest extra words, then volume.
+    path = tag_words(str(row["path"]).replace("-", " ").replace("/", " "))
+    words_of = lambda c: tag_words(names.at[c, "name"])
+    best = max(cands, key=lambda c: (len(path & words_of(c)), words_of(c) == want, c == row["cid"], -len(words_of(c) - want), cvol.get(c, 0)))
+    return best, tag[0], label
+
+
+tagged = hpages.apply(tag_cluster, axis=1, result_type="expand")
+moved = (tagged[0] != hpages["cid"]) & tagged[0].notna()
+hpages[["cid", "how", "tag"]] = tagged.values
+print(f"pages linked by POI or collection: {int(hpages['tag'].notna().sum())}; moved from the text mapping: {int(moved.sum())}")
+
+
+def sources(cid):
+    """Pages, products and Headout entities for one hybrid cluster, in the shape the mockup reads."""
+    pg = hpages[hpages["cid"] == cid].sort_values("revenue", ascending=False)
+    sx = hsup[hsup["cid"] == cid].sort_values(["live", "revenue_usd"], ascending=False)
+    sr = hsrc.loc[cid] if cid in hsrc.index else pd.Series(dtype=object)
+    return {
+        "page_revenue": r(pg["revenue"].sum(), 2), "pct_ce_revenue": r(pg["revenue"].sum() / v3["ce"]["revenue"], 4),
+        "organic_orders": r(pg["org_orders"].sum()), "organic_revenue": r(pg["org_revenue"].sum(), 2),
+        "pages": [{"path": x.url, "type": x.page_sub_type, "collection": None if pd.isna(x.collection_id) else str(x.collection_id).split(".")[0],
+                   "noindex": bool(x.any_noindex), "revenue": r(x.revenue, 2), "orders": r(x.orders),
+                   "organic_orders": r(x.org_orders), "organic_revenue": r(x.org_revenue, 2),
+                   "tag": None if pd.isna(x.tag) else x.tag, "how": None if pd.isna(x.how) else x.how} for x in pg.itertuples()],
+        "supply": {"n": int(sx["experience_id"].nunique()), "live": int(sx["live"].sum()), "revenue": r(sx["revenue_usd"].sum(), 2),
+                   "orders": int(sx["orders"].sum()),
+                   "experiences": [{"name": x.experience_name, "live": bool(x.live), "revenue": r(x.revenue_usd, 2), "orders": int(x.orders)}
+                                   for x in sx.itertuples()]},
+        "entity": {"status": sr.get("entity_status", "CE collection") if pd.notna(sr.get("entity_status")) else "CE collection",
+                   "items": [{"type": x.entity_type, "id": x.entity_id, "name": x.name, "active": str(x.is_active) == "True"}
+                             for x in hent[hent["cid"] == cid].itertuples()]},
+    }
+
+pair_cid = assign(PAIR_RUN).drop_duplicates("k").set_index("k")
+pairs = pd.read_csv(SNAP / "keyword_search_terms.csv").assign(k=lambda d: d["term"].map(norm))
+pairs["cid"] = pairs["k"].map(pair_cid[COL])
+pairs["how"] = pairs["k"].map(pair_cid["E_how"])
+pairs["ag"] = pairs["kw_key"].str.split("~").str[0]
+totals = pd.read_csv(SNAP / "keyword_totals.csv").assign(k=lambda d: d["keyword"].map(norm), ag=lambda d: d["kw_key"].str.split("~").str[0])
+# Vatican's capture snapshot was pulled without conversions. The 30 Oct validation pull is the same query and window
+# (identical keyword keys and clicks), so its conversions join on kw_key.
+if "conv" not in totals:
+    vconv = pd.read_csv(ROOT / "snapshots" / "20261030_validation_v1" / "keyword_totals.csv", dtype={"ce": str})
+    totals = totals.merge(vconv.loc[vconv["ce"] == str(CE), ["kw_key", "conv"]], on="kw_key", how="left")
+kw_text_cid = assign(KEYWORD_RUN).drop_duplicates("k").set_index("k")[COL]
+ads = pd.read_csv(SNAP / "ad_groups.csv").assign(ag=lambda d: d["ad_group_id"].astype(str)).drop_duplicates("ag").set_index("ag")
+
+# Own ad group, Parag's method: find the live ad groups that bid on the cluster's focus keyword (or a close variant that
+# shares its Keyword Planner volume), take the one with the most clicks as the core, then check how much of the
+# cluster's keyword volume that ad group also bids on.
+live_ags = set(ads.index[(ads["ad_group_status"] == "ENABLED") & (ads["campaign_status"] == "ENABLED")])
+bids = pd.read_csv(OUT / f"quality_score_{CE}.csv", dtype={"ad_group_id": str})
+bids = bids[bids["ad_group_id"].isin(live_ags)].assign(k=lambda d: d["keyword"].map(norm))
+ag_bids = bids.groupby("ad_group_id")["k"].agg(set)
+kw_ags = bids.groupby("k")["ad_group_id"].agg(set)
+ag_clicks = totals.groupby("ag")["clicks"].sum()
+
+
+def own_ad_group(cluster_kw, focus):
+    """State of the cluster in Google Ads: full (core ad group holds its focus keyword and most of its volume), focus
+    (only the focus keyword), or missing (no live ad group bids on the focus keyword)."""
+    if focus is None or not len(cluster_kw):
+        return {"state": "missing"}
+    fam = cluster_kw.assign(f=[f"v{v:.0f}" if v >= 1000 else f"k{key}" for v, key in zip(cluster_kw["vol"].fillna(0), cluster_kw["k"])])
+    focus_fam = fam.loc[fam["k"] == norm(focus), "f"]
+    focus_keys = set(fam.loc[fam["f"].isin(focus_fam), "k"]) | {norm(focus)}
+    holders = set().union(*[kw_ags.get(key, set()) for key in focus_keys])
+    families = fam.groupby("f").agg(vol=("vol", "first"), keys=("k", lambda ks: set(ks)))
+    families["vol"] = families["vol"].fillna(0).clip(lower=1)
+    if not holders:
+        bid = families["keys"].map(lambda ks: any(key in kw_ags.index for key in ks))
+        return {"state": "missing", "focus": focus, "held": int(bid.sum()), "of": int(len(families))}
+    core = max(holders, key=lambda a: (ag_clicks.get(a, 0), len(ag_bids.get(a, ()))))
+    in_core = ag_bids.get(core, set())
+    held = families["keys"].map(lambda ks: bool(ks & in_core))
+    share = families.loc[held, "vol"].sum() / families["vol"].sum()
+    return {"state": "full" if share >= 0.5 else "focus", "focus": focus, "share": r(share, 3),
+            "ag": ads.at[core, "ad_group_name"], "campaign": ads.at[core, "campaign_name"], "clicks": r(ag_clicks.get(core, 0)),
+            "held": int(held.sum()), "of": int(len(families)), "groups": len(holders)}
+
+pairs = pairs.join(ads[["ad_group_name", "campaign_name"]], on="ag")
+match_types = pd.read_csv(SNAP / "keyword_shares.csv")
+match_types = match_types[(match_types["ce"] == CE) & (match_types["impr"] > 0)].assign(k=lambda d: d["keyword"].map(norm)).set_index("k")["match_types"]
+
+# Each keyword's complete totals split over clusters by its served searches: clicks by their clicks, spend by their
+# spend, CM1 and conversions by their CM1, impression measures by their impressions. Keywords with no visible search
+# follow their text. The search-term pairs carry no conversion count, so conversions ride on the CM1 weight.
+by = pairs.dropna(subset=["cid"]).groupby(["kw_key", "cid"])[["impr", "clicks", "spend", "conv_value"]].sum()
+w = by / by.groupby(level=0).transform("sum")
+for c in ("clicks", "spend", "conv_value"):
+    w[c] = w[c].fillna(w["impr"])
+w = w.add_prefix("w_").reset_index()
+unseen = totals[~totals["kw_key"].isin(w["kw_key"])]
+w = pd.concat([w, pd.DataFrame({"kw_key": unseen["kw_key"], "cid": unseen["k"].map(kw_text_cid),
+                                **{f"w_{c}": 1.0 for c in ("impr", "clicks", "spend", "conv_value")}})]).dropna(subset=["cid"])
+spread = totals.merge(w, on="kw_key")
+for c, wc in [("impr", "w_impr"), ("eligible", "w_impr"), ("lost_rank", "w_impr"), ("impr_with_share", "w_impr"),
+              ("clicks", "w_clicks"), ("spend", "w_spend"), ("conv_value", "w_conv_value"), ("conv", "w_conv_value")]:
+    spread[c] = spread[c].fillna(0) * spread[wc]
+
+# AI Max is flagged per search term x ad group in the search-term report; a pair inherits that flag.
+stba = pd.read_csv(SNAP / "search_terms_by_adgroup.csv")
+stba = stba[stba["ce"] == CE].assign(k=lambda d: d["term"].map(norm), ag=lambda d: d["ad_group_id"].astype(str))
+ai_share = (stba.assign(ai=stba["match_type"].eq("AI_MAX") * stba["clicks"]).groupby(["k", "ag"])[["ai", "clicks"]].sum())
+ai_share = (ai_share["ai"] / ai_share["clicks"]).fillna(0)
+pairs["ai"] = [ai_share.get((k, g), 0) for k, g in zip(pairs["k"], pairs["ag"])]
+
+# Paid revenue: paid orders traced by gclid to an ad group and targeted keyword (paid_orders_by_click), then over
+# clusters by that keyword's click weights; orders with an ad group but no keyword follow the ad group's cluster mix.
+po = pd.read_csv(V4 / "paid_orders_by_click.csv" if CE == 189 else OUT / f"paid_orders_by_click_{CE}.csv")
+po = po[po["ce"] == CE]
+# The traced share is of all paid revenue, so orders with no gclid or no matching click count against it.
+paid_total = po["revenue_usd"].sum()
+po = po[po["match_status"] == "matched"].assign(ag=lambda d: d["ad_group_id"].astype(str).str.replace(r"\.0$", "", regex=True),
+                                                                    k=lambda d: d["keyword_text"].map(norm))
+key_of = totals.drop_duplicates(["ag", "k"]).set_index(["ag", "k"])["kw_key"]
+po["kw_key"] = [key_of.get((g, k)) for g, k in zip(po["ag"], po["k"])]
+rev_kw = po.dropna(subset=["kw_key"]).merge(w[["kw_key", "cid", "w_clicks"]], on="kw_key")
+rev_kw["rev"] = rev_kw["revenue_usd"] * rev_kw["w_clicks"]
+ag_mix = pairs.dropna(subset=["cid"]).groupby(["ag", "cid"])["clicks"].sum()
+ag_mix = (ag_mix / ag_mix.groupby(level=0).transform("sum")).rename("share").reset_index()
+rev_ag = po[po["kw_key"].isna()].merge(ag_mix, on="ag")
+rev_ag["rev"] = rev_ag["revenue_usd"] * rev_ag["share"]
+paid_rev = pd.concat([rev_kw[["cid", "rev"]], rev_ag[["cid", "rev"]]]).groupby("cid")["rev"].sum()
+traced_share = paid_rev.sum() / paid_total if paid_total else None
+
+# Satvik's capture workbook covers Vatican only.
+cap = pd.read_csv(WB / "capture.csv").set_index("Cluster") if CE == 189 else pd.DataFrame().rename_axis("Cluster")
+cov = pd.read_csv(WB / "cluster_adgroups.csv").set_index("Cluster") if CE == 189 else pd.DataFrame().rename_axis("Cluster")
+org = assign(ORGANIC_RUN)
+org_cid = org.dropna(subset=[COL])
+
+lp = pd.read_csv(LANDING)
+lp["host"] = lp["host"].str.replace(r"^www\.", "", regex=True)
+lp["top_path"] = lp["top_path"].str.replace("{ignore}", "", regex=False)
+lp = lp.groupby(["campaign_name", "ad_group_name", "host", "top_path"], as_index=False)[["clicks", "spend"]].sum()
+ag_landing = lp.sort_values("clicks", ascending=False).drop_duplicates(["campaign_name", "ad_group_name"]).set_index(["campaign_name", "ad_group_name"])["top_path"]
+
+
+def theme_of(name):
+    # Vatican ad groups are "<intent> - <match> - <language> - <sub-theme>".
+    p = str(name).split(" - ")
+    return p[0] + ("" if len(p) < 4 or p[3] == "All" else " · " + p[3])
+
+
+def ag_label(name):
+    p = str(name).split(" - ")
+    return f"{theme_of(name)} · {p[2]}" if len(p) > 2 else str(name)
+
+
+def land_label(path, own):
+    bare = re.sub(r"^/[a-z]{2}/", "/", str(path)).rstrip("/")
+    if bare in own:
+        return "its own page"
+    return "home page" if re.fullmatch(r"/([a-z]{2}/)?", str(path)) else "other page"
+
+
+def page_kind(url):
+    path = "/" + str(url).split("/", 3)[3] if str(url).count("/") >= 3 else "/"
+    if "/blog/" in path:
+        return "Blog"
+    return "Home page" if len(path.strip("/")) <= 5 and "-" not in path else "Dedicated page"
+
+
+def cap_get(name, col, scale=1.0):
+    if name not in cap.index or pd.isna(cap.at[name, col]):
+        return None
+    return float(cap.at[name, col]) * scale
+
+
+ag_total_clicks = pairs.groupby("ag")["clicks"].sum()
+targeted_all = set(match_types.index)
+clusters, drawer = [], {}
+
+for cid, meta in names.iterrows():
+    name, k = meta["name"], kw[kw["cid"] == cid]
+    if name.startswith("Other ("):
+        continue
+    in_eos = (old.get(cid) or old_by_name.get(name.lower())) is not None
+    src = sources(cid)
+    p = pairs[pairs["cid"] == cid]
+    sp = spread[spread["cid"] == cid]
+    o = org_cid[org_cid[COL] == cid]
+    clicks, spend, cm1, impr, conv = sp["clicks"].sum(), sp["spend"].sum(), sp["conv_value"].sum(), sp["impr"].sum(), sp["conv"].sum()
+    eligible = sp["eligible"].sum()
+    top_kw = k.sort_values("vol", ascending=False)
+
+    # Ad groups serving the cluster, from its searches' clicks.
+    ag = p.groupby(["ag", "ad_group_name", "campaign_name"]).agg(clicks=("clicks", "sum"), spend=("spend", "sum"), cm1=("conv_value", "sum"),
+                                                                 terms=("k", "nunique")).reset_index().sort_values("clicks", ascending=False)
+    ag["share"] = ag["clicks"] / ag["ag"].map(ag_total_clicks)
+    ded = ag[ag["share"] >= 0.5]
+    catch_all = ag.loc[ag["ad_group_name"].str.endswith(" - All"), "spend"].sum() / ag["spend"].sum() if ag["spend"].sum() else None
+
+    own = set()
+    for pg in (src or {}).get("pages", []):
+        own.add(("/" + pg["path"].split("/", 1)[1]).rstrip("/") if "/" in pg["path"] else "")
+
+    # How each paid click was caught, by theme, and where it landed.
+    pc = p.assign(theme=p["ad_group_name"].map(theme_of),
+                  how=["AI Max, no keyword" if a >= 0.5 else ("Its own exact keyword" if norm(kt) == t else "A different keyword")
+                       for a, kt, t in zip(p["ai"], p["kw_key"].map(totals.drop_duplicates("kw_key").set_index("kw_key")["k"]), p["k"])],
+                  land=[land_label(ag_landing.get((cn, an), ""), own) for cn, an in zip(p["campaign_name"], p["ad_group_name"])])
+    themes = pc.groupby("theme")["clicks"].sum().sort_values(ascending=False)
+    keep = themes.head(4).index
+    pc["theme2"] = pc["theme"].where(pc["theme"].isin(keep), "Other themes")
+    bars = [{"theme": t, "clicks": r(g["clicks"].sum()),
+             "how": {h: r(v) for h, v in g.groupby("how")["clicks"].sum().items()}}
+            for t, g in pc.groupby("theme2")]
+    bars.sort(key=lambda b: (b["theme"] == "Other themes", -b["clicks"]))
+    land_mix = {h: r(v) for h, v in pc.groupby("land")["clicks"].sum().items()}
+    how_mix = {h: r(v) for h, v in pc.groupby("how")["clicks"].sum().items()}
+    # Which cluster owns the keyword that caught each paid click: Aditya's "is the keyword present" test, read from search
+    # terms. A keyword maps to a cluster through the keyword mapping run, so own = caught by one of this cluster's keywords.
+    trig_cid = p["kw_key"].map(totals.drop_duplicates("kw_key").set_index("kw_key")["k"]).map(kw_text_cid)
+    is_ai = p["ai"].fillna(0) >= 0.5
+    is_own = ~is_ai & (trig_cid == cid)
+    trig = {"own": r(p.loc[is_own, "clicks"].sum()), "other": r(p.loc[~is_ai & ~is_own, "clicks"].sum()), "ai": r(p.loc[is_ai, "clicks"].sum())}
+
+    pt = pc.groupby("k").agg(term=("term", "first"), clicks=("clicks", "sum"), spend=("spend", "sum"), cm1=("conv_value", "sum"),
+                             ai=("ai", "mean"), groups=("ag", "nunique"), how=("how", "first"))
+    ot = o.groupby("k").agg(oterm=("term", "first"), oclicks=("clicks", "sum"), oimpr=("impressions", "sum"), pos=("avg_position", "mean"),
+                            page=("top_page", "first"), ohow=("E_how", "first"))
+    s = pt.join(ot, how="outer")
+    s["term"] = s["term"].fillna(s["oterm"])
+    s["is_kw"] = s.index.isin(set(k["k"]))
+    s["weight"] = s["clicks"].fillna(0) + s["oclicks"].fillna(0)
+    s = s.sort_values("weight", ascending=False)
+    caught = (pc.assign(kwt=pc["kw_key"].map(totals.drop_duplicates("kw_key").set_index("kw_key")["keyword"]), agl=pc["ad_group_name"].map(ag_label))
+              .groupby(["term", "kwt", "agl", "land"]).agg(clicks=("clicks", "sum"), spend=("spend", "sum"), ai=("ai", "mean")).reset_index()
+              .sort_values("clicks", ascending=False).head(200))
+    pages = o.groupby("top_page")["clicks"].sum().sort_values(ascending=False)
+    tg = sp[sp["w_clicks"] >= 0.5].groupby("k").agg(kw=("keyword", "first"), impr=("impr", "sum"), clicks=("clicks", "sum"), spend=("spend", "sum"),
+                                                    cm1=("conv_value", "sum"), eligible=("eligible", "sum"), lost=("lost_rank", "sum"),
+                                                    iws=("impr_with_share", "sum"), groups=("ag", "nunique")).sort_values("impr", ascending=False)
+    eos_vol = k["vol"].fillna(0)
+    targeted_eos = k["k"].isin(targeted_all)
+    vol_share = (eos_vol[targeted_eos].sum() / eos_vol.sum()) if eos_vol.sum() else (targeted_eos.mean() if len(k) else 0)
+
+    untargeted = pt[~pt.index.isin(targeted_all) & (pt["clicks"] >= MIN_TERM_CLICKS)].sort_values("clicks", ascending=False)
+    neg = pairs[pairs["ag"].isin(set(ded["ag"])) & pairs["cid"].notna() & (pairs["cid"] != cid)]
+    neg = neg.groupby(["k", "cid"]).agg(term=("term", "first"), clicks=("clicks", "sum"), spend=("spend", "sum")).reset_index().sort_values("clicks", ascending=False)
+    neg = neg[neg["clicks"] >= MIN_TERM_CLICKS]
+    top_theme = themes.index[0] if len(themes) else None
+    camps = p.groupby("campaign_name")["clicks"].sum().sort_values(ascending=False)
+
+    cv = lambda col: None if name not in cov.index or pd.isna(cov.at[name, col]) else cov.at[name, col]
+    cl = {
+        "id": cid, "name": name, "type": meta["t"], "seeded": not in_eos, "head": name == HEAD_NAME or "Head Term" in name,
+        "n_kw": int(len(k)), "vol": r(top_kw["vol"].iloc[0]) if len(top_kw) and pd.notna(top_kw["vol"].iloc[0]) else None,
+        "vol_source": "eos", "focus_kw": top_kw["kw"].iloc[0] if len(top_kw) else None,
+        "adg": own_ad_group(k, top_kw["kw"].iloc[0] if len(top_kw) else None),
+        "impr": r(impr), "clicks": r(clicks), "spend": r(spend, 2), "google_value": r(cm1, 2), "conv": r(conv, 1),
+        "paid_revenue": r(paid_rev.get(cid), 2), "n_ad_groups": int(len(ag)),
+        "top_ad_group": ag["ad_group_name"].iloc[0] if len(ag) else None,
+        "top_ag_purity": r(ag["share"].iloc[0], 3) if len(ag) else None,
+        "ai_max_share": r((pc["clicks"] * pc["ai"]).sum() / pc["clicks"].sum(), 3) if pc["clicks"].sum() else None,
+        "catch_all": r(catch_all, 3),
+        "demand": {"month": cap_get(name, "Demand / month"), "from": cap.at[name, "Demand from"] if name in cap.index else None,
+                   "planner": cap_get(name, "Keyword Planner volume / month"), "eligible": cap_get(name, "Paid eligible impressions / month"),
+                   "organic_impr": cap_get(name, "Organic impressions / month")},
+        "capture": {"paid": cap_get(name, "Paid capture %"), "organic": cap_get(name, "Organic click capture %"),
+                    "missed": cap_get(name, "Impressions missed / month"), "stake": cap_get(name, "CM1 at stake / month"),
+                    "status": cap.at[name, "Status"] if name in cap.index and pd.notna(cap.at[name, "Status"]) else None},
+        "theme": {"coverage": cv("Theme coverage"), "top": cv("Top theme"), "reach": cv("Top theme reach %"), "focus": cv("Top theme focus %"),
+                  "mix": cv("Themes (share of cluster clicks)")},
+        "page_revenue": (src or {}).get("page_revenue"), "pct_ce_revenue": (src or {}).get("pct_ce_revenue"),
+        "pages": (src or {}).get("pages", []),
+        "organic_orders": (src or {}).get("organic_orders"), "organic_revenue": (src or {}).get("organic_revenue"),
+        "supply": (src or {}).get("supply") or {"n": 0, "live": 0, "revenue": 0, "experiences": []},
+        "entity": (src or {}).get("entity") or {"status": "CE collection", "items": []},
+        "organic": {"clicks": r(o["clicks"].sum()), "impr": r(o["impressions"].sum()),
+                    "position": r((o["avg_position"] * o["impressions"]).sum() / o["impressions"].sum(), 1) if o["impressions"].sum() else None,
+                    "queries": int(o["k"].nunique()), "top": []},
+        "keywords": [{"kw": x.kw, "vol": r(x.vol)} for x in top_kw.head(8).itertuples()],
+        "changes": {"why_added": None if in_eos else "Added to the validated set (seed cluster): no EOS cluster covered it"},
+    }
+    clusters.append(cl)
+
+    sis = sp["impr_with_share"].sum() / eligible if eligible else None
+    drawer[cid] = {
+        # live = a live keyword in an enabled ad group of an enabled campaign (own_ad_group's list); targeted keeps the
+        # match types it served with. fam groups close variants the way own_ad_group does.
+        "keywords": [{"kw": x.kw, "vol": r(x.vol), "clicks": r(s.at[x.k, "clicks"]) if x.k in s.index else None,
+                      "oclicks": r(s.at[x.k, "oclicks"]) if x.k in s.index else None, "pos": r(s.at[x.k, "pos"], 1) if x.k in s.index else None,
+                      "targeted": match_types.get(x.k), "live": x.k in kw_ags.index,
+                      "fam": f"v{x.vol:.0f}" if pd.notna(x.vol) and x.vol >= 1000 else f"k{x.k}"} for x in top_kw.itertuples()],
+        "searches": [{"term": x.term, "kw": bool(x.is_kw), "clicks": r(x.clicks), "spend": r(x.spend, 2), "cm1": r(x.cm1, 2),
+                      "ai": r((x.ai or 0) * (x.clicks or 0)), "groups": r(x.groups), "oclicks": r(x.oclicks), "impr": r(x.oimpr), "pos": r(x.pos, 1),
+                      "page": None if pd.isna(x.page) else str(x.page).replace("https://", ""),
+                      "how": None if pd.isna(x.ohow) else x.ohow} for x in s.head(TOP_SEARCHES).itertuples()],
+        "search_totals": {"n": int(len(s)), "paid_terms": int(pt.shape[0]), "organic_queries": int(ot.shape[0]),
+                          "rest_clicks": r(s["clicks"].iloc[TOP_SEARCHES:].sum()), "rest_oclicks": r(s["oclicks"].iloc[TOP_SEARCHES:].sum())},
+        "ad_groups": [{"name": x.ad_group_name, "label": ag_label(x.ad_group_name), "campaign": x.campaign_name, "clicks": r(x.clicks),
+                       "spend": r(x.spend, 2), "cm1": r(x.cm1, 2), "terms": int(x.terms), "share": r(x.share, 3),
+                       "landing": [ag_landing.get((x.campaign_name, x.ad_group_name), "")] if (x.campaign_name, x.ad_group_name) in ag_landing.index else [],
+                       "top_terms": []} for x in ag.head(30).itertuples()],
+        "ad_group_count": int(len(ag)),
+        "dedicated": {"groups": int(len(ded)), "of": int(len(ag)),
+                      "share": r(ded["clicks"].sum() / ag["clicks"].sum(), 3) if ag["clicks"].sum() else None},
+        "targeted": {"n": int(len(tg)), "vol_share": r(vol_share, 3), "eos_targeted": int(targeted_eos.sum()),
+                     "list": [{"kw": x.kw, "match": match_types.get(i, ""), "impr": r(x.impr), "clicks": r(x.clicks), "spend": r(x.spend, 2),
+                               "cm1": r(x.cm1, 2), "sis": r(x.iws / x.eligible, 3) if x.eligible else None,
+                               "lost": r(x.lost / x.eligible, 3) if x.eligible else None, "groups": r(x.groups),
+                               "eos": i in set(k["k"])} for i, x in tg.head(60).iterrows()]},
+        "impression_share": {"sis": r(sis, 3), "lost": r(sp["lost_rank"].sum() / eligible, 3) if eligible else None,
+                             "stake": r(cap_get(name, "CM1 at stake / month", MONTHS), 2)},
+        "bars": bars, "land_mix": land_mix, "how_mix": how_mix, "trig": trig,
+        "caught": [{"term": x.term, "kw": "AI Max, no keyword" if x.ai >= 0.5 else x.kwt, "ag": x.agl, "land": x.land,
+                    "clicks": r(x.clicks), "spend": r(x.spend, 2)} for x in caught.itertuples()],
+        "ranking_page": {"url": str(pages.index[0]).replace("https://", ""), "kind": page_kind(pages.index[0]),
+                         "share": r(pages.iloc[0] / pages.sum(), 3)} if len(pages) and pages.iloc[0] > 0 else None,
+        "landing": None,
+        "perf": {
+            "home_ad_group": None if ded.empty and ag.empty else {"name": (ded if len(ded) else ag).iloc[0]["ad_group_name"],
+                                                                  "campaign": (ded if len(ded) else ag).iloc[0]["campaign_name"], "dedicated": bool(len(ded))},
+            "theme": top_theme,
+            "untargeted": [{"term": x.term, "clicks": r(x.clicks), "spend": r(x.spend, 2), "cm1": r(x.cm1, 2)} for x in untargeted.head(10).itertuples()],
+            "untargeted_spend": r(untargeted["spend"].sum(), 2), "untargeted_clicks": r(untargeted["clicks"].sum()),
+            "eos_untargeted": [{"kw": x.kw, "vol": r(x.vol)} for x in k[~targeted_eos].sort_values("vol", ascending=False).head(5).itertuples()],
+            "campaigns": [{"name": c, "share": r(v / camps.sum(), 3)} for c, v in camps.head(5).items()] if camps.sum() else [],
+            "negatives": [{"term": x.term, "clicks": r(x.clicks), "spend": r(x.spend, 2), "belongs": names.at[x.cid, "name"] if x.cid in names.index else "another cluster"}
+                          for x in neg.head(8).itertuples()],
+            "negatives_spend": r(neg["spend"].sum(), 2),
+            "shared_ad_groups": [{"name": x.ad_group_name, "campaign": x.campaign_name, "clicks": r(x.clicks), "share": r(x.share, 3)}
+                                 for x in ag[ag["share"] < 0.1].head(5).itertuples()],
+        },
+        "products": [],
+    }
+    # Landing mix in the shape the Paid lands on column reads.
+    lm = pc.assign(path=[ag_landing.get((cn, an), "") for cn, an in zip(pc["campaign_name"], pc["ad_group_name"])]).groupby("path")["clicks"].sum()
+    if lm.sum():
+        lm = lm.sort_values(ascending=False)
+        drawer[cid]["landing"] = {"hosts": [], "pages": [{"host": SITE, "path": pth or "/", "share": r(v / lm.sum(), 3)} for pth, v in lm.head(6).items()]}
+
+# Search-term view of each cluster (what Perf reads): the share Google shows, conversions for CM1 per order, and the
+# language split. The campaign's language is the third part of its name ("Rome - Vatican - German - All - ...").
+stba["cid"] = stba["k"].map(pair_cid[COL])
+stba["lang"] = stba["campaign_name"].str.split(" - ").str[2]
+st_cid = stba.dropna(subset=["cid"]).groupby("cid")[["impr", "clicks", "spend", "conv", "conv_value"]].sum()
+lang_cid = stba.dropna(subset=["cid"]).groupby(["cid", "lang"])["clicks"].sum()
+st_shown = stba["clicks"].sum() / totals["clicks"].sum()
+
+# Ad groups serving a cluster (Paid tab): its search-term clicks by ad group, with the same ad group name in one
+# language counted once across country campaigns (Perf edits them as a set). share_of_group = this cluster's part
+# of that ad group's clicks, which says whether the group is built for the cluster or the cluster rides a generic one.
+group_clicks = stba.groupby(["ad_group_name", "lang"])["clicks"].sum()
+
+
+def ad_groups_serving(cid, cluster_keys):
+    mine = stba[stba["cid"] == cid]
+    if not mine["clicks"].sum():
+        return None
+    g = mine.groupby(["ad_group_name", "lang"]).agg(clicks=("clicks", "sum"), spend=("spend", "sum"), cv=("conv_value", "sum"),
+                                                    countries=("campaign_name", "nunique"), ags=("ag", lambda a: set(a))).reset_index()
+    g["share_of_cluster"] = g["clicks"] / mine["clicks"].sum()
+    g["share_of_group"] = [c / group_clicks[(a, l)] for a, l, c in zip(g["ad_group_name"], g["lang"], g["clicks"])]
+    g = g.sort_values("clicks", ascending=False)
+    rows = []
+    for x in g.head(5).itertuples():
+        bid = set().union(*[ag_bids.get(a, set()) for a in x.ags])
+        loose = mine[mine["ag"].isin(x.ags) & ~mine["k"].isin(bid)].groupby("term")["clicks"].sum().sort_values(ascending=False)
+        rows.append({"name": x.ad_group_name, "lang": x.lang, "countries": int(x.countries), "clicks": r(x.clicks), "spend": r(x.spend, 2),
+                     "cv": r(x.cv, 2), "share_of_cluster": r(x.share_of_cluster, 3), "share_of_group": r(x.share_of_group, 3),
+                     "keywords": sorted(cluster_keys & bid)[:8], "keywords_n": len(cluster_keys & bid),
+                     "loose": [{"term": t, "clicks": r(v)} for t, v in loose.head(4).items()]})
+    return {"clicks": r(mine["clicks"].sum()), "groups": int(len(g)), "keys": len(cluster_keys),
+            "own_share": r(g.loc[g["share_of_group"] >= 0.5, "clicks"].sum() / mine["clicks"].sum(), 3), "rows": rows}
+
+
+# Campaign targets. Portfolio-strategy campaigns carry 0 in the export, so they keep the strategy name.
+troas = pd.read_csv(OUT / f"campaign_troas_{CE}.csv")
+troas = {x.campaign_name: (r(x.target_roas, 2) if x.target_roas else None, None if pd.isna(x.bidding_strategy_name) else x.bidding_strategy_name)
+         for x in troas.itertuples()}
+camp_cid = stba.dropna(subset=["cid"]).groupby(["cid", "campaign_name"])[["clicks", "spend", "conv_value"]].sum()
+
+# Weekly search terms (13 full weeks), mapped with the same term assignments.
+wk = pd.read_csv(OUT / f"search_terms_weekly_{CE}.csv").assign(k=lambda d: d["term"].map(norm))
+wk["cid"] = wk["k"].map(pair_cid[COL])
+weeks = sorted(wk["week"].unique())
+wk_cid = wk.dropna(subset=["cid"]).groupby(["cid", "week"])[["impr", "clicks", "spend", "conv_value"]].sum()
+wk_mapped = wk.dropna(subset=["cid"])["clicks"].sum() / wk["clicks"].sum()
+# Search terms that cost more than they earned over the 13 weeks, per cluster: the watch list Aditya wants only while a
+# new CE's campaigns learn. 30 clicks keeps noise out; the tool applies Perf's own click floor on top.
+wk_t = (wk.dropna(subset=["cid"]).groupby(["cid", "k"]).agg(term=("term", "first"), clicks=("clicks", "sum"), spend=("spend", "sum"),
+        cv=("conv_value", "sum")).reset_index())
+wk_t = wk_t[(wk_t["clicks"] >= 30) & (wk_t["cv"] < wk_t["spend"])].sort_values("spend", ascending=False)
+for cid, g in wk_t.groupby("cid"):
+    if cid in drawer:
+        drawer[cid]["loss13"] = [{"term": x.term, "clicks": int(x.clicks), "spend": r(x.spend, 2), "cv": r(x.cv, 2)} for x in g.head(40).itertuples()]
+
+# Quality Score: keywords with a score (0 = not enough traffic), weighted by the keyword's impressions in the window.
+qs = pd.read_csv(OUT / f"quality_score_{CE}.csv")
+qs = qs[qs["quality_score"] > 0].assign(kw_key=lambda d: d["ad_group_id"].astype(str) + "~" + d["criterion_id"].astype(str),
+                                        k=lambda d: d["keyword"].map(norm))
+qs = qs.merge(totals[["kw_key", "impr"]], on="kw_key", how="left").fillna({"impr": 0})
+qs["cid"] = qs["k"].map(kw_text_cid)
+qs_kw = qs.groupby("k")[["quality_score", "impr"]].apply(lambda g: (g["quality_score"] * (g["impr"] + 1)).sum() / (g["impr"] + 1).sum())
+qs_cid = qs.dropna(subset=["cid"]).groupby("cid")[["quality_score", "impr"]].apply(lambda g: (g["quality_score"] * g["impr"]).sum() / g["impr"].sum() if g["impr"].sum() else None)
+
+# Landing pages: ad-level results joined to each ad's final URL, shared out to clusters by each cluster's part of
+# the ad group's search-term clicks. Path keeps the language folder (/de/ is its own page).
+def lp_path(u):
+    u = re.sub(r"\{[^}]*\}|\?.*$", "", str(u or ""))
+    host = re.sub(r"^https?://(www\.)?", "", u).split("/")[0]
+    path = "/" + "/".join(re.sub(r"^https?://[^/]+/?", "", u).strip("/").split("/")) if u else ""
+    return host, ("/" if path in ("/", "") else path.rstrip("/") + "/")
+lpr = pd.read_csv(OUT / f"landing_page_results_{CE}.csv").assign(ag=lambda d: d["ad_group_id"].astype(str))
+lpr[["host", "path"]] = pd.DataFrame([lp_path(u) for u in lpr["landing_url"]], index=lpr.index)
+# Where the cluster's core ad group sends its clicks: the final URL with most clicks across that ad group's ads.
+core_lp = lpr.assign(ag_name=lpr["ag"].map(ads["ad_group_name"])).groupby(["ag", "host", "path"])["clicks"].sum().reset_index()
+for cl in clusters:
+    adg = cl["adg"]
+    if not adg.get("ag"):
+        continue
+    core = next((a for a in live_ags if ads.at[a, "ad_group_name"] == adg["ag"] and ads.at[a, "campaign_name"] == adg["campaign"]), None)
+    rows = core_lp[core_lp["ag"] == core].sort_values("clicks", ascending=False)
+    if len(rows) and rows["clicks"].sum():
+        adg["landing"] = {"host": rows["host"].iloc[0], "path": rows["path"].iloc[0], "share": r(rows["clicks"].iloc[0] / rows["clicks"].sum(), 3)}
+# Google rates landing page experience per keyword; an ad group takes the rating most of its impressions carry.
+lpx = qs[qs["landing_page_experience"] != "UNSPECIFIED"].assign(ag=lambda d: d["ad_group_id"].astype(str)) \
+    .groupby(["ag", "landing_page_experience"])["impr"].sum().reset_index().sort_values("impr").drop_duplicates("ag", keep="last").set_index("ag")["landing_page_experience"]
+ag_cid = pairs.dropna(subset=["cid"]).groupby(["ag", "cid"])["clicks"].sum().reset_index()
+ag_cid["w"] = ag_cid["clicks"] / ag_cid["ag"].map(ag_total_clicks)
+lp_cid = lpr.merge(ag_cid[["ag", "cid", "w"]], on="ag")
+for col in ("clicks", "impr", "spend", "conv", "conv_value"):
+    lp_cid[col] = lp_cid[col] * lp_cid["w"]
+lp_cid["lpx"] = lp_cid["ag"].map(lpx)
+RATING = {"BELOW_AVERAGE": 0, "AVERAGE": 1, "ABOVE_AVERAGE": 2}
+# Paid search sessions by entry page (Mixpanel): page-level, all clusters together; the funnel has no ad group.
+# A new site can have no Mixpanel sessions yet; bq then writes an empty file, read here as no funnel rows.
+try:
+    fun = pd.read_csv(OUT / f"landing_page_funnel_{CE}.csv")
+except pd.errors.EmptyDataError:
+    fun = pd.DataFrame(columns=["entry_page", "sessions", "select_sessions", "checkout_sessions", "order_sessions"])
+fun["path"] = ["/" if p in ("", "/") else p.rstrip("/") + "/" for p in fun["entry_page"].str.replace(r"^[^/]+", "", regex=True)]
+fun = fun.groupby("path")[["sessions", "select_sessions", "checkout_sessions", "order_sessions"]].sum()
+# Products: every matched experience with its TGID, why it is not live, variants and price.
+var = pd.read_csv(OUT / f"experience_variants_{CE}.csv", dtype={"experience_id": str}).set_index("experience_id")
+vav = pd.read_csv(OUT / f"variant_availability_{CE}.csv", dtype={"experience_id": str, "variant_id": str, "tour_ids": str})
+VSTATUS = {"Active": 0, "Under Curation": 1, "Disabled": 2, "Deleted": 3}
+vord = pd.read_csv(OUT / f"variant_orders_{CE}.csv", dtype={"experience_id": str, "variant_id": str}).set_index("variant_id")
+pfun = pd.read_csv(OUT / f"product_funnel_{CE}.csv", dtype={"experience_id": str}).set_index("experience_id")
+
+# Products for a cluster are the ones its landing page shows (Parag, 30 Oct): the core ad group's landing page, else the
+# cluster's own page; that page's collection ranking in Rome. Payload's sub_category_id is not a listing filter (most
+# info pages carry 1002 whatever their topic), so the ranking is not narrowed by it.
+pp = pd.read_csv(OUT / f"page_products_{CE}.csv", dtype={"collection_id": str, "experience_id": str, "primary_sub_category_id": str})
+pp["computed_rank"] = pd.to_numeric(pp["computed_rank"])
+page_ids = hpages.assign(key=hpages["path"].fillna("").str.strip("/"))
+page_ids = page_ids.drop_duplicates("key").set_index("key")
+ent_id = lambda v: None if pd.isna(v) else str(v).split(".")[0]
+
+
+def page_key(path):
+    key = str(path or "").replace(HOST, "").strip("/")
+    return "" if re.fullmatch(r"[a-z]{2}", key) else key
+
+
+GENERIC = {"the", "and", "tickets", "vatican", "museums", "museum", "milford", "sound", "tours", "tour", "cruises", "cruise"}
+words = lambda t: {w for w in re.split(r"[^a-z0-9]+", re.sub(r"\(.*?\)", " ", str(t).lower())) if len(w) > 2 and w not in GENERIC}
+
+
+def own_page(cl):
+    """The cluster's main page, as the table's Page column picks it: the most words shared with its name and focus
+    keyword, then the most revenue."""
+    want = words(cl["name"]) | words(cl["focus_kw"])
+    return max(cl["pages"], key=lambda pg: (len(words(page_key(pg["path"]).replace("-", " ")) & want), pg["revenue"] or 0))
+
+
+def page_products(cl):
+    """The products the cluster's landing page shows (the core ad group's landing page, else its own page), in the
+    page's order after its rules: the same list as the page pop-up."""
+    land = cl["adg"].get("landing")
+    key = page_key(land["path"]) if land else page_key(own_page(cl)["path"]) if cl["pages"] else None
+    if key is None or key not in page_ids.index:
+        return None, []
+    x = shows["/" + key if key else "/"]
+    return {"page": x["page"], "collection": x["collection"], "n": len(x["items"]), "ranked": x["ranked"]}, x["items"]
+
+
+def funnel_rate(experience_id, num, den):
+    if experience_id not in pfun.index or not pfun.at[experience_id, den]:
+        return None
+    return r(pfun.at[experience_id, num] / pfun.at[experience_id, den], 3)
+
+
+
+def variants_of(eid):
+    g = vav[vav["experience_id"] == eid].assign(o=lambda d: d["variant_status"].map(VSTATUS).fillna(9)).sort_values(["o", "is_available"], ascending=[True, False])
+    return [{"id": x.variant_id, "name": None if pd.isna(x.variant_name) else x.variant_name, "status": x.variant_status, "live": bool(x.is_available),
+             "orders": int(vord.at[x.variant_id, "count_orders"]) if x.variant_id in vord.index else 0,
+             "revenue": r(vord.at[x.variant_id, "sum_revenue_usd"], 2) if x.variant_id in vord.index else 0,
+             "paid_orders": int(vord.at[x.variant_id, "count_paid_orders"]) if x.variant_id in vord.index else 0,
+             "next": None if pd.isna(x.next_available_date) else str(x.next_available_date),
+             "price": None if pd.isna(x.listing_final_price) else r(float(x.listing_final_price), 2),
+             "rating": None if pd.isna(x.average_rating) else r(x.average_rating, 1), "ratings": None if pd.isna(x.count_ratings) else int(x.count_ratings),
+             "tours": [] if pd.isna(x.tour_ids) else str(x.tour_ids).split(), "vendors": None if pd.isna(x.vendors) else x.vendors,
+             "open7": bool(x.is_available_7d) if pd.notna(x.is_available_7d) else False, "open30": bool(x.is_available_30d) if pd.notna(x.is_available_30d) else False}
+            for x in g.itertuples()]
+
+
+# What each page shows (the page pop-up): its collection's published ranking (already after Ranking Workbench pins),
+# then the page's Payload block rules in the order the site applies them: exclusions, sub-category filter, page pins
+# (commonRanks) on top, products not on sale dropped, cut at the block's display limit (no limit set = 10).
+# ranking-mappings/00-mapping-model.md has the rules; grid blocks that name their own entity are not modelled.
+blocks = pd.read_csv(HERE / "hybrid" / "page_product_blocks.csv", dtype={"filter_sub_category_id": str, "filter_category_id": str})
+blocks = blocks[blocks["uid"].str.startswith(HOST)].sort_values("block_position")
+pins_named = pd.read_csv(HERE / "hybrid" / "page_pinned_products.csv", dtype={"experience_id": str}).set_index("experience_id")
+tool_pins = pd.read_csv(HERE / "hybrid" / "collection_overrides.csv", dtype={"collection_id": str, "experience_id": str})
+coll_name = tag_names.xs("collection", level=0) if "collection" in tag_names.index.get_level_values(0) else pd.Series(dtype=str)
+ids_of = lambda v: [str(i) for i in json.loads(v)] if isinstance(v, str) and v.startswith("[") else []
+subcats_of = lambda v: {str(x.get("sub_category_id")) for x in json.loads(v)} if isinstance(v, str) and v.startswith("[") else set()
+
+
+def on_sale(eid):
+    vl = variants_of(eid)
+    return any(v["status"] == "Active" and v["live"] for v in vl) if vl else None
+
+
+def page_shows(key, row):
+    uid = HOST + ("." + key.replace("/", ".") if key else "")
+    coll = ent_id(row["collection_id"])
+    b = blocks[blocks["uid"] == uid]
+    blk = b.iloc[0] if len(b) else None
+    limit = int(blk["experience_limit"]) if blk is not None and pd.notna(blk["experience_limit"]) else 10
+    sub = None if blk is None or pd.isna(blk["filter_sub_category_id"]) else str(blk["filter_sub_category_id"]).split(".")[0]
+    pins = ids_of(blk["common_ranks"]) if blk is not None else []
+    excl = set(ids_of(blk["common_exclusions"])) if blk is not None else set()
+    ranked = pp[pp["collection_id"] == coll].sort_values("computed_rank")
+    items, dropped = [], 0
+    for x in ranked.itertuples():
+        if x.experience_id in excl or x.experience_id in pins:
+            continue
+        if sub and sub not in subcats_of(x.mapped_sub_categories) and str(getattr(x, "primary_sub_category_id", "")).split(".")[0] != sub:
+            continue
+        items.append({"tgid": x.experience_id, "name": x.experience_name, "source": x.ranking_source, "rank": int(x.computed_rank)})
+    for i, t in enumerate(pins):
+        known = pp[pp["experience_id"] == t]
+        name = known["experience_name"].iloc[0] if len(known) else (pins_named.at[t, "experience_name"] if t in pins_named.index else None)
+        items.insert(i, {"tgid": t, "name": name, "source": "Page pin", "rank": None})
+    shown = []
+    for it in items:
+        live = on_sale(it["tgid"])
+        if live is False:
+            dropped += 1
+            continue
+        tot = vord[vord["experience_id"] == it["tgid"]]
+        orders = int(tot["count_orders"].sum()) if len(tot) else (int(pins_named.at[it["tgid"], "count_orders"]) if it["tgid"] in pins_named.index else 0)
+        revenue = r(tot["sum_revenue_usd"].sum(), 2) if len(tot) else (r(pins_named.at[it["tgid"], "sum_revenue_usd"], 2) if it["tgid"] in pins_named.index else 0)
+        shown.append({**it, "orders": orders, "revenue": revenue})
+        if len(shown) == limit:
+            break
+    tp = tool_pins[tool_pins["collection_id"] == coll]
+    return {"page": "/" + key if key else "/", "collection": coll, "collection_name": coll_name.get(coll),
+            "tag": None if pd.isna(row.get("tag")) else row.get("tag"), "has_block": blk is not None,
+            "block": None if blk is None else {"type": blk["variant_type"], "limit": limit, "sub_category": sub, "pins": pins, "exclusions": sorted(excl)},
+            "ranked": int(len(ranked)), "dropped": dropped, "items": shown,
+            "tool_pins": [{"tgid": t.experience_id, "position": int(t.position), "expiry": t.expiry, "reason": None if pd.isna(t.reason) else t.reason}
+                          for t in tp.itertuples()]}
+
+
+# Products a cluster's searches ask for, matched by name across every product any page of the CE lists: all the words of
+# the cluster's name, else all the words of its focus keyword, once the CE's own name and filler words are set aside.
+SP_STOP = {"the", "and", "with", "from", "for", "price", "prices", "cost", "best", "cheap", "near", "how", "what", "when",
+           "where", "book", "booking", "online", "official", "head", "term", "general"}
+CE_WORDS = set(CFG.get("name_words", [])) if CE != 189 else {"vatican", "museums", "museum"}
+fold = lambda t: unicodedata.normalize("NFKD", str(t).lower()).encode("ascii", "ignore").decode()
+stem = lambda w: w[:-1] if len(w) > 4 and w.endswith("s") else w
+sp_words = lambda t: {stem(w) for w in re.split(r"[^a-z0-9]+", fold(re.sub(r"\(.*?\)", " ", str(t)))) if len(w) > 2 and w not in SP_STOP and fold(w) not in {fold(x) for x in CE_WORDS}}
+catalog = pp.drop_duplicates("experience_id")[["experience_id", "experience_name"]].assign(w=lambda d: d["experience_name"].map(sp_words))
+
+
+def searched_products(cl):
+    for want in (sp_words(cl["name"]), sp_words(cl["focus_kw"])):
+        if not want:
+            continue
+        hit = catalog[catalog["w"].map(lambda w: want <= w)]
+        if len(hit):
+            break
+    else:
+        return []
+    out = []
+    for x in hit.itertuples():
+        vl = variants_of(x.experience_id)
+        sale = [v for v in vl if v["status"] == "Active" and v["live"]]
+        out.append({"tgid": x.experience_id, "name": x.experience_name, "words": sorted(want),
+                    "orders": sum(v["orders"] for v in vl), "revenue": r(sum(v["revenue"] for v in vl), 2),
+                    "paid_orders": sum(v["paid_orders"] for v in vl), "on_sale": bool(sale),
+                    "price": min((v["price"] for v in sale if v["price"] is not None), default=None),
+                    "next": min((v["next"] for v in sale if v["next"]), default=None),
+                    "shown": [{"page": pg, "pos": i + 1} for pg, sh in shows.items() for i, it in enumerate(sh["items"]) if it["tgid"] == x.experience_id][:4]})
+    return sorted(out, key=lambda d: -d["orders"])[:8]
+
+
+# The CE's home is its Payload "Theme" page: the bare host on most sites, /home on Park Güell's.
+_pg_all = pd.read_csv(HERE / "hybrid" / "pages_189.csv" if CE == 189 else OUT / f"pages_{CE}.csv", usecols=["uid", "page_type"])
+_theme = _pg_all.loc[_pg_all["page_type"] == "Theme", "uid"]
+HOME_PATH = "/" + "/".join(_theme.iloc[0].split(".")[len(HOST.split(".")):]) if len(_theme) else "/"
+
+
+def page_funnel(path):
+    key = "/" + page_key(path) + "/" if page_key(path) else "/"
+    if key not in fun.index or not fun.at[key, "sessions"]:
+        return None
+    f = fun.loc[key]
+    return {"sessions": int(f["sessions"]), "select": r(f["select_sessions"] / f["sessions"], 3), "order": r(f["order_sessions"] / f["sessions"], 3)}
+
+
+shows = {}
+for _, prow in page_ids.iterrows():
+    shows["/" + prow.name if prow.name else "/"] = page_shows(prow.name, prow)
+
+for cl in clusters:
+    cid = cl["id"]
+    st = st_cid.loc[cid] if cid in st_cid.index else None
+    cl["st"] = None if st is None else {"impr": r(st["impr"]), "clicks": r(st["clicks"]), "spend": r(st["spend"], 2), "conv": r(st["conv"], 1),
+                                       "cv": r(st["conv_value"], 2), "shown": r(st["clicks"] / cl["clicks"], 3) if cl["clicks"] else None}
+    cl["qs"] = r(qs_cid.get(cid), 1) if cid in qs_cid.index and pd.notna(qs_cid.get(cid)) else None
+    cl["weekly"] = [{"w": w, **({k2: r(v, 2 if k2 in ("spend", "conv_value") else 0) for k2, v in wk_cid.loc[(cid, w)].items()} if (cid, w) in wk_cid.index else {})}
+                    for w in weeks]
+    dr = drawer[cid]
+    dr["ag_serving"] = ad_groups_serving(cid, set(kw.loc[kw["cid"] == cid, "k"]))
+    dr["langs"] = [{"lang": l, "clicks": r(v)} for l, v in lang_cid.loc[cid].sort_values(ascending=False).items()] if cid in lang_cid.index.get_level_values(0) else []
+    dr["campaigns"] = [{"name": n, "clicks": r(v["clicks"]), "spend": r(v["spend"], 2), "cv": r(v["conv_value"], 2),
+                        "troas": troas.get(n, (None, None))[0], "portfolio": troas.get(n, (None, None))[1]}
+                       for n, v in camp_cid.loc[cid].sort_values("clicks", ascending=False).head(12).iterrows()] if cid in camp_cid.index.get_level_values(0) else []
+    g = lp_cid[lp_cid["cid"] == cid]
+    if len(g):
+        tot = g["clicks"].sum() or 1
+        rows = []
+        for (host, path), x in g.groupby(["host", "path"]):
+            rated = x.dropna(subset=["lpx"])
+            score = (rated["lpx"].map(RATING) * rated["clicks"]).sum() / rated["clicks"].sum() if rated["clicks"].sum() else None
+            rows.append({"host": host, "path": path, "share": r(x["clicks"].sum() / tot, 3), "clicks": r(x["clicks"].sum()),
+                         "spend": r(x["spend"].sum(), 2), "conv": r(x["conv"].sum(), 1), "cv": r(x["conv_value"].sum(), 2),
+                         "lpx": None if score is None else ["Below average", "Average", "Above average"][int(round(score))]})
+        for row in rows:
+            f = fun.loc[row["path"]] if row["host"] == SITE and row["path"] in fun.index else None
+            row["sessions"] = None if f is None else int(f["sessions"])
+            row["select"] = None if f is None else r(f["select_sessions"] / f["sessions"], 3)
+        dr["lp"] = sorted(rows, key=lambda d: -d["clicks"])[:10]
+    dr["searched_products"] = searched_products(cl)
+    for pg in cl["pages"]:
+        pg["funnel"] = page_funnel(pg["path"])
+    on_page, shown = page_products(cl)
+    dr["products_page"] = on_page
+    dr["products"] = []
+    for pos, it in enumerate(shown, start=1):
+        eid = it["tgid"]
+        x = pp[pp["experience_id"] == eid].head(1)
+        vl = variants_of(eid)
+        live = any(v["status"] == "Active" and v["live"] for v in vl)
+        dr["products"].append({
+            "tgid": eid, "name": it["name"], "rank": pos, "source": it["source"], "live": live, "why": None if live else "unavailable",
+            "orders": it["orders"],
+            "revenue": it["revenue"],
+            "paid_orders": int(vord.loc[vord["experience_id"] == eid, "count_paid_orders"].sum()),
+            "selects": int(pfun.at[eid, "count_select_users"]) if eid in pfun.index else None,
+            "s2c": funnel_rate(eid, "count_checkout_users", "count_select_users"),
+            "c2o": funnel_rate(eid, "count_order_users", "count_checkout_users"),
+            "variants": int(var.at[eid, "variants"]) if eid in var.index else None,
+            "live_variants": int(var.at[eid, "live_variants"]) if eid in var.index else None,
+            "from_price": r(var.at[eid, "from_price"], 2) if eid in var.index and pd.notna(var.at[eid, "from_price"]) else None,
+            "sub_category": x["primary_sub_category_name"].iloc[0] if len(x) and pd.notna(x["primary_sub_category_name"].iloc[0]) else (pins_named.at[eid, "primary_sub_category_name"] if eid in pins_named.index and pd.notna(pins_named.at[eid, "primary_sub_category_name"]) else None),
+            "vlist": vl})
+    for kw_row in dr["keywords"]:
+        v = qs_kw.get(norm(kw_row["kw"]))
+        kw_row["qs"] = r(v, 1) if v is not None and pd.notna(v) else None
+
+unc = pd.read_csv(WB / "uncaptured.csv").sort_values("Paid impressions / month", ascending=False) if CE == 189 else pd.DataFrame()
+total_paid_clicks = pairs["clicks"].sum()
+mapped_paid_clicks = pairs.loc[pairs["cid"].notna(), "clicks"].sum()
+ce = dict(v3["ce"])
+ce.update({"search_terms_shown": r(st_shown, 3), "weeks": [str(w) for w in weeks], "weekly_mapped": r(wk_mapped, 3), "paid_clicks_mapped": r(mapped_paid_clicks / total_paid_clicks, 3), "organic_clicks_mapped": r(org_cid["clicks"].sum() / org["clicks"].sum(), 3),
+           "home": HOME_PATH,
+           # The CE's own Google Ads totals and live keywords, account-wide: the header reads these, not a sum over clusters
+           # (clusters share searches), and a search that is already a live keyword anywhere is never suggested as one to add.
+           "paid": {"clicks": r(totals["clicks"].sum()), "spend": r(totals["spend"].sum(), 2), "conv_value": r(totals["conv_value"].sum(), 2)},
+           "live_keywords": sorted(kw_ags.index), "home_funnel": page_funnel(HOME_PATH), "paid_revenue_traced": r(traced_share, 3), "clusters_from": "hybrid_eos_v5" if CE == 189 else "hybrid_11ce"})
+data = {"ce": ce, "clusters": clusters, "page_shows": shows, "pages_no_cluster": [{"path": x.url, "type": x.page_sub_type, "focus": x.text, "revenue": r(x.revenue, 2)}
+                             for x in hpages[hpages["cid"].isna()].sort_values("revenue", ascending=False).itertuples()],
+        "uncaptured": [{"name": x._3, "intent": x.Intent, "searches": x.Searches, "paid_impr": r(x._6), "organic_impr": r(x._7),
+                        "organic_clicks": r(x._8), "top": x._9} for x in unc.head(30).itertuples()],
+        "unmapped_terms": [], "unmapped_organic": [], "change_log": v3.get("change_log", []),
+        "sources": {"clusters": CLUSTERS.parent.name, "paid": f"{SNAP.name} keyword totals, spread by served searches",
+                    "pairs": PAIR_RUN, "organic": ORGANIC_RUN, "pages_products_entities": f"{SOURCES.parent.name if SOURCES else 'none'}; {PAGES.name}"}}
+OUT.mkdir(exist_ok=True)
+(OUT / DATA).write_text(json.dumps(data, separators=(",", ":")))
+(OUT / "drawer.json").write_text(json.dumps({"clusters": drawer}, separators=(",", ":")))
+(OUT / "impression_share.json").write_text(json.dumps({"window": "30 Jul - 27 Oct", "hidden_spend": 0, "total_spend": r(spread["spend"].sum(), 2),
+                                                        "clusters": {c["id"]: {"catch_all": c["catch_all"]} for c in clusters}}))
+print(f"{len(clusters)} clusters; paid clicks {r(spread['clicks'].sum())}, spend {r(spread['spend'].sum())}, CM1 {r(spread['conv_value'].sum())}; "
+      f"paid revenue traced {'n/a' if traced_share is None else f'{traced_share:.0%}'}; clusters with a page {sum(bool(c['pages']) for c in clusters)}")

@@ -1,0 +1,101 @@
+id,term,source,weight,label
+0,le petit palais,organic,1476,NONE
+1,musee d'orsay,organic,21084,NONE
+2,musée d'orsay,organic,44823,NONE
+3,visites de musée d'orsay,organic,417,NONE
+4,tickets voor louvre,organic,127,NONE
+5,opéra de paris,organic,2424,NONE
+6,musée orsay,organic,5629,NONE
+7,arc de triomphe,organic,27683,NONE
+8,opera paris,organic,3555,NONE
+9,musée du louvre,organic,13325,NONE
+10,louvres,organic,1331,NONE
+11,disneyland paris,organic,6456,NONE
+12,palais garnier,organic,50948,NONE
+13,paris panthéon,organic,437,NONE
+14,quai branly,organic,2281,NONE
+15,chateau de vincennes,organic,6601,NONE
+16,musee du louvre,organic,4898,NONE
+17,musee orsay,organic,15345,NONE
+18,louvre,organic,27520,NONE
+19,seine river cruise,organic,9399,Seine River Cruises in Paris (Head Term)
+20,tombeau napoleon,organic,628,NONE
+21,musee picasso,organic,4436,NONE
+22,petit palais,organic,32242,NONE
+23,pantheon,organic,15565,NONE
+24,opera garnier visite,organic,2303,NONE
+25,palais garnier ticket,organic,141,NONE
+26,musée orsay paris,organic,1144,NONE
+27,arc de triomphe tickets,organic,13152,NONE
+28,château de vincennes,organic,888,NONE
+29,napoleons tomb,organic,1377,NONE
+30,opéra garnier,organic,15454,NONE
+31,seine cruise paris,organic,81,Seine River Cruises in Paris (Head Term)
+32,luvre,organic,173,NONE
+33,billets pour musée d'orsay,organic,7079,NONE
+34,disneylandparijs,organic,618,NONE
+35,palais garnier tickets,organic,27710,NONE
+36,opéra garnier visite,organic,1409,NONE
+37,pantheon paris,organic,4798,NONE
+38,disneyland parijs,organic,33599,NONE
+39,d orsay musee paris,organic,271,NONE
+40,opera garnier,organic,43312,NONE
+41,panthéon,organic,10935,NONE
+42,palais garnier paris,organic,1358,NONE
+43,billets pour palais garnier,organic,4933,NONE
+44,hotel de ville paris,organic,3510,NONE
+45,visite pantheon,organic,352,NONE
+46,petit palais paris,organic,6905,NONE
+47,le louvre,organic,10512,NONE
+48,musée du louvres,organic,655,NONE
+49,opera palais garnier,organic,203,NONE
+50,petit palais expo,organic,1713,NONE
+51,musee d'orsay paris,organic,390,NONE
+52,billets pour musée grévin,organic,1409,NONE
+53,panthéon paris,organic,4622,NONE
+54,musée du louvre paris,organic,536,NONE
+55,paris opera,organic,5581,NONE
+56,europe river cruises,organic,1743,NONE|Multi-day Seine Itineraries (Paris–Normandy & River Lines)
+57,musee carnavalet,organic,4833,NONE
+58,disneyland ticket prices,organic,12793,NONE
+59,opera garnier paris,organic,4316,NONE
+60,pont de l'alma,organic,2180,NONE|Bateaux Mouches Cruises
+61,disney parijs,organic,1940,NONE
+62,disneyland,organic,5630,NONE
+63,paradis latin paris,organic,1889,NONE
+64,visite opera garnier,organic,1748,NONE
+65,musee quai branly,organic,6210,NONE
+66,musée picasso,organic,8920,NONE
+67,the musee du louvre,organic,157,NONE
+68,paris musee d orsay,organic,250,NONE
+69,musée du quai branly,organic,13569,NONE
+70,eurodisney,organic,2271,NONE
+71,disneyland parijs tickets,organic,1442,NONE
+72,musee du quai branly,organic,2311,NONE
+73,billet pour musée du louvre,organic,60,NONE
+74,opera de paris,organic,7424,NONE
+75,le musée du louvre,organic,130,NONE
+76,musée carnavalet,organic,9833,NONE
+77,musee grevin,organic,1398,NONE
+78,musée quai branly,organic,6133,NONE
+79,paris opera house,organic,5384,NONE
+80,musee carnavalet expo,organic,314,NONE
+81,paris opera house tickets,organic,844,NONE
+82,rodin museum paris,organic,208,NONE
+83,palais garnier opera house,organic,157,NONE
+84,tickets voor disneyland paris,organic,1347,NONE
+85,musée chirac paris,organic,66,NONE
+86,louvre musée,organic,441,NONE
+87,ticket für louvre,organic,99,NONE
+88,petit palais tickets,organic,977,NONE
+89,expo petit palais,organic,1658,NONE
+90,arc de triomphe hours,organic,705,NONE
+91,musee d orsay paris,organic,1067,NONE
+92,carnavalet,organic,1908,NONE
+93,hop on hop off paris,organic,221,NONE|Hop-on Hop-off River Boats (Batobus)
+94,palais du luxembourg,organic,1053,NONE
+95,нотр дам де пари,organic,3660,NONE
+96,eurodisney parijs,organic,745,NONE
+97,musée du quai branly - jacques chirac,organic,997,NONE
+98,billets pour musée du louvre,organic,8988,NONE
+99,musée d orsay,organic,976,NONE

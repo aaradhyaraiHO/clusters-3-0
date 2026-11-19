@@ -1,0 +1,12 @@
+ce,name,city,country,subcat,gsc_sites,page_regex
+189,Vatican Museums,Rome,Italy,Museum / Gallery,https://www.thevaticantickets.com/,vatican|sistine
+325,Park Güell,Barcelona,Spain,Landmark / POI,,park-guell
+243,Eiffel Tower,Paris,France,Landmark / POI,,eiffel-tower
+257,Moulin Rouge,Paris,France,Activity / Experience,,moulin-rouge
+261,Seine River Cruises,Paris,France,Cruise,,seine
+2010,Harry Potter Walking Tours,London,United Kingdom,Walking Tour,,harry-potter
+3176,Montserrat Monastery,Barcelona,Spain,Day Trip,,montserrat
+1695,Sydney Whale Watching Cruises,Sydney,Australia,Cruise,https://www.tickets-sydney.com/,whale
+2640,Hot Air Balloon Cappadocia,Cappadocia,Turkey,Adventure Activity,https://www.hotairballoons-cappadocia.com/ https://www.tours-cappadocia.com/,balloon
+3945,Milford Sound Cruises,Milford Sound,New Zealand,Cruise,https://www.milford-sound-cruises.co.nz/,milford-sound
+2743,Great Barrier Reef Cruises,Cairns,Australia,Cruise,,great-barrier-reef

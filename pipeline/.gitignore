@@ -1,0 +1,6 @@
+# Data stays local; code, SQL, manifests, configs, metrics and the ledger are versioned.
+snapshots/*/*.csv
+snapshots/*/pages/
+runs/*/outputs/
+.env-clusters/
+__pycache__/

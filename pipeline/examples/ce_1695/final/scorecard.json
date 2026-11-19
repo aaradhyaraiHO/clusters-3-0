@@ -1,0 +1,24 @@
+{
+  "ce": "1695",
+  "clusters": 36,
+  "eos_style_unclaimed_keywords": 44,
+  "keywords_vol_no_cluster": 0.0001,
+  "keywords_vol_low_confidence": 0.0013,
+  "keywords_jev_failed": 0,
+  "paid_clicks_no_cluster": 0.014,
+  "paid_clicks_low_confidence": 0.0158,
+  "paid_jev_failed": 0,
+  "organic_impressions_no_cluster": 0.9691,
+  "organic_impressions_low_confidence": 0.0219,
+  "organic_jev_failed": 0,
+  "run_agreement": [
+    0.991,
+    0.989,
+    0.99
+  ],
+  "paid_judged_wrong": 0.0008,
+  "paid_judged_n": 100,
+  "organic_judged_wrong": 0.0111,
+  "organic_judged_n": 100,
+  "prompt": "clusters.md"
+}

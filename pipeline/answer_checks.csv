@@ -1,0 +1,81 @@
+ce,id,type,a,b,value,check
+*,all-competitors,exclude,\b(viator|getyourguide|get your guide|tiqets|klook|tripadvisor)\b,,,Competitor and OTA names sit in no cluster
+*,all-catchall,max_share,,,0.25,No cluster holds more than 25% of the keywords
+243,eif-night,has,\b(night|sunset|evening|soir)\b,,,Night tours / sunset
+243,eif-champagne,has,champagne,,,Champagne Bar
+243,eif-height,has,\b(height|tall|how high|facts?|meters|metres)\b,,,Height / facts
+243,eif-trocadero,has,trocadero,,,Trocadéro
+243,eif-prices,has,\b(price|prices|cost|how much)\b,,,Prices
+243,eif-stairs,has,\b(stairs|elevator|lift)\b,,,Elevator vs stairs
+243,eif-xmas,has,\b(christmas|noel|navidad|weihnacht)\b,,,Christmas
+243,eif-nye,has,(new year|nye|reveillon|nouvel an),,,New Year's Eve
+243,eif-summit,separate,(summit|top floor|sommet),(2nd floor|second floor|2eme etage|deuxieme etage),,Summit vs 2nd floor tickets
+243,eif-lift,separate,\b(elevator|lift)\b,\bstairs\b,,Elevator vs stairs
+243,eif-vip,separate,\b(private|vip)\b,\b(combo|cruise|seine|louvre)\b,,Private / VIP vs combos
+243,eif-hotels,exclude,hotel.*view|view.*hotel|airbnb,,,Hotels with an Eiffel Tower view
+243,eif-58,not_cluster,58 tour eiffel,,,No cluster for 58 Tour Eiffel
+243,eif-deck,not_cluster,observation deck,,,No cluster for Observation Deck
+243,eif-fkw-guided,fkw,guided tour,,eiffel tower guided tour,Guided Tours focus keyword is 'eiffel tower guided tour'
+243,eif-fkw-inside,fkw,\binside\b,,inside (the )?eiffel tower,Inside focus keyword is 'inside eiffel tower'
+257,mr-musical,separate,\b(cabaret|feerie|dinner show|diner spectacle)\b,\bmusical\b,,Paris cabaret show vs the musical
+257,mr-film,separate,\bmusical\b,\b(film|movie|nicole kidman|baz luhrmann)\b,,Musical vs film
+257,mr-late,has,(11 ?pm|23h|late show),,,Late show (11pm)
+257,mr-showonly,has,(show only|without dinner|sans diner|spectacle seul),,,Show only
+257,mr-dinner,has,\b(dinner|diner|cena)\b,,,Dinner and show
+257,mr-combo,has,\b(combo|cruise|croisiere|seine)\b,,,Combos
+257,mr-dress,has,(dress code|what to wear|tenue),,,Dress code
+257,mr-age,has,\b(age|children|kids|enfants|child)\b,,,Age limit
+257,mr-seat,has,\b(seat|seats|seating|places|table)\b,,,Seating
+257,mr-tour,exclude,(musical tour|tour dates|uk tour|us tour|touring),,,Musical touring production out of scope
+257,mr-intent,intent,\b(cabaret|show|spectacle)\b,,TRANSACTIONAL,Cabaret show is Transactional
+3945,mil-head,head,^milford sound tours?$,milford sound,,'milford sound tours' sits with the head term
+3945,mil-overnight,has,overnight,,,Overnight cruises
+3945,mil-smallboat,has,small (boat|ship)|boutique,,,Small-boat cruises
+3945,mil-track,has,milford track,,,Milford Track
+3945,mil-fiordland,has,fiordland national park,,,Fiordland National Park
+3945,mil-map,has,\bmap\b,,,Map
+3945,mil-operators,separate,(real ?nz|real journeys),southern discoveries,,One cluster per operator (RealNZ vs Southern Discoveries)
+3945,mil-op-intent,intent,southern discoveries|real ?nz|real journeys,,TRANSACTIONAL,Operator clusters are Transactional
+3945,mil-time,single,best time,(timetable|schedule|departure time|cruise times),,Best time to visit + timetable in one cluster
+3945,mil-price,single,\b(price|prices|cost|deal|deals)\b,\b(ticket|tickets|book|booking)\b,,Cruise prices and cruise tickets in one cluster
+3945,mil-observatory,intent,observatory,,INFORMATIONAL|PLANNING,Underwater observatory is Informational at most
+3945,mil-lotr,exclude,(lord of the rings|glacier),,,'lord of the rings' and 'glacier' out of scope
+2743,gbr-flight,has,\b(flight|flights|scenic flight|helicopter|seaplane)\b,,,Flight / scenic flight tours
+2743,gbr-outer,has,(outer reef|inner reef),,,Inner vs outer reef
+2743,gbr-marine,has,(marine life|fish|turtle|turtles|animals|coral|sharks?),,,Marine life
+2743,gbr-facts,has,\b(facts|history)\b,,,Facts / history
+2743,gbr-besttime,has,best time,,,Best time to visit
+2743,gbr-weather,has,weather,,,Weather
+2743,gbr-getting,has,(how to get|getting to|get to),,,How to get there
+2743,gbr-map,has,\bmap\b,,,Map
+2743,gbr-plan,has,\b(plan|planning|itinerary)\b,,,Plan your visit
+2743,gbr-compare,has,(\bvs\b|versus|compare|comparison|which is better),,,Comparisons
+2743,gbr-todo,has,things to do,,,Things to do
+2743,gbr-islands,separate,green island,fitzroy,,Islands are separate clusters
+2743,gbr-ops,separate,quicksilver,(reef magic|sunlover),,Operators are separate clusters
+2743,gbr-daytrip,single,day trips?,\bcruises?\b,,Day trips and cruises in one cluster
+2743,gbr-intent,intent,best .*cruise.*cairns|best .*cairns.*cruise,,TRANSACTIONAL,'best great barrier reef cruise from cairns' is Transactional
+2743,gbr-fkw,fkw,^great barrier reef cruises?$,,great barrier reef cruise,Landing focus keyword is 'great barrier reef cruise'
+3176,mon-getting,single,\b(train|cremallera|rack railway|r5)\b,\b(bus|car|drive|parking|cable car|aeri)\b,,Getting there is one cluster
+3176,mon-basilica,intent,basilica,,TRANSACTIONAL,The ticketed basilica is Transactional
+3176,mon-singletons,max_singletons,,,0,No single-keyword clusters under 500 searches
+1695,syd-planning,has,(best time|season|when to|what to bring|tips),,,Planning cluster(s)
+1695,syd-head,head_share,,whale watching sydney,0.25,The head cluster holds under 25% of keywords
+261,sei-batobus,has,batobus,,,Batobus
+261,sei-multiday,exclude,(multi.?day|\b\d+ days?\b|viking|normandy|normandie),,,Multi-day river cruises out of scope
+2010,hp-studio,separate,\b(walking tour|walk|walks)\b,(studio|warner|leavesden),,Walking tours vs Warner Bros Studio
+2010,hp-sights,has,(platform 9|kings cross|king s cross|leadenhall|millennium bridge|diagon|film locations?),,,Sub-attraction / film-location clusters
+189,vat-official,has,(official|ufficiale|oficial|offiziell|officiel),,,Official site / official tickets
+189,vat-papal,has,(papal audience|pope|papa|mass|messe|misa),,,Papal audience and masses
+189,vat-castel,has,castel gandolfo,,,Castel Gandolfo
+189,vat-scavi,has,(necropolis|scavi|necropoli),,,Necropolis / Scavi
+189,vat-lang,in,(visita guidata|visite guidee|fuhrung|visita guiada),(guided|tour),,Guided tours in other languages sit in a guided-tours cluster
+189,vat-pass,separate,\b(pass|passes)\b,^(?!.*\bpass).*(ticket|biglietti|entradas|billets),,Passes vs Tickets
+189,vat-discount,purity,(discount|reduced|student|ridotto|reducido|ermassigt),,0.6,Discount cluster holds discount keywords only
+189,vat-gardens,purity,(garden|giardini|jardines|garten|jardins),,0.6,Gardens cluster holds garden keywords only
+325,pg-official,has,(official|oficial|oficial|ufficiale|offiziell|officiel),,,Official site / official tickets
+325,pg-combo,has,(sagrada|batllo|pedrera|casa mila),,,Combo with Sagrada Família / Casa Batlló
+325,pg-free,has,\b(free|gratis|gratuit|gratuita)\b,,,Free entry
+325,pg-skip,has,(skip the line|fast track|sin colas|coupe file),,,Skip-the-line
+325,pg-guided,has,(guided tour|visita guiada|tour guiado|visite guidee),,,Guided tours
+325,pg-gaudi,intent,(gaudi house|casa museu gaudi|casa museo gaudi),,TRANSACTIONAL,Gaudí House Museum is Transactional

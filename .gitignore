@@ -1,0 +1,11 @@
+.env-clusters/
+snapshots/
+runs/
+pipeline_local/
+hybrid*/
+__pycache__/
+*.pyc
+node_modules/
+.vercel/
+.DS_Store
+ui/*-clusters.html

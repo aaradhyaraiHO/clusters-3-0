@@ -1,0 +1,11 @@
+{
+  "name": "clusters-3-0",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Clusters 3.0 prototype pages behind a Google @headout.com auth gate. No database.",
+  "dependencies": {
+    "@vercel/edge": "^1.1.1",
+    "jose": "^5.9.6"
+  }
+}
