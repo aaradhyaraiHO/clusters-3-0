@@ -357,7 +357,7 @@ th.sortable{user-select:none}
 .stchip.st-bad{background:var(--bad-soft);color:#c40303}.stchip.st-warn{background:var(--warn-soft);color:#936300}.stchip.st-ok{background:var(--ok-soft);color:#057a3a}.stchip.st-mute{background:var(--page);color:var(--fg2)}
 .chip.stf i{font-style:normal;color:var(--fg4);margin-left:4px}
 .stbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 10px}.stbar .spacer{flex:1}
-.setup{display:flex;flex-direction:column;gap:3px}.sstep{display:flex;gap:6px;align-items:flex-start;font-size:12px;line-height:16px;color:var(--fg2)}
+.setup{display:flex;flex-direction:column;gap:3px}.sline{display:flex;flex-wrap:wrap;align-items:center;column-gap:6px;row-gap:2px}.sacts{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px;padding-left:20px}.sacts .s{color:var(--fg3)}select.esel{border:1px solid var(--line);background:var(--bg);border-radius:12px;padding:1px 6px;font-size:11px;line-height:15px;color:var(--fg2);width:auto;max-width:110px;flex:none;cursor:pointer}.sstep{display:flex;gap:6px;align-items:flex-start;font-size:12px;line-height:16px;color:var(--fg2)}
 .sstep i{flex:none;width:14px;height:14px;border-radius:7px;display:grid;place-items:center;font-style:normal;font-size:9px;font-weight:700;color:#fff;margin-top:1px}
 .su-done i{background:#057a3a}.su-warn i{background:#936300}.su-todo i{background:#c4c4c4}.su-now i{background:var(--accent)}.su-na i{background:#e9e9e9;color:var(--fg4)}.su-na{color:var(--fg4)}
 .ctbl col.w-lnch{width:200px}.ctbl td.c-lnch,.ctbl th.c-lnch{text-align:center;vertical-align:middle;position:sticky;right:0;z-index:2;background:#faf7ff;box-shadow:-6px 0 8px -6px rgba(17,17,17,.18)}.ctbl thead th.c-lnch{z-index:4}.ctbl tr.sel td.c-lnch,.ctbl tr:hover td.c-lnch{background:#f3ecff}.lcell{display:inline-flex;flex-direction:column;align-items:center;gap:4px}.lcell .s{text-align:center;max-width:180px}.stchip.st-acc{background:var(--accent-soft);color:var(--accent-ink)}.chip.stf.zero{opacity:.55}.stbar .chip.stf{display:inline-flex;align-items:center;gap:6px;padding:4px 10px 4px 5px;background:var(--bg)}.stbar .chip.stf b{font-size:13px;font-weight:600;color:var(--fg)}.stbar .chip.stf[aria-pressed="true"]{border-color:var(--fg)}#tiles .tiles.tiles{grid-template-columns:repeat(4,minmax(0,1fr))!important}.vmenu{position:relative}.vpop{position:absolute;right:0;top:calc(100% + 6px);z-index:30;background:var(--bg);border-radius:12px;box-shadow:var(--shadow-2,0 6px 24px rgba(17,17,17,.16));padding:10px;display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-width:200px}.setup button.sgo{border:0;background:none;padding:0;font:inherit;text-align:left;cursor:pointer;color:inherit}.setup button.sgo:hover span{text-decoration:underline;text-decoration-color:var(--line)}.ctbl td.flash{animation:cflash 1.6s ease-out}@keyframes cflash{0%,40%{background:var(--accent-soft);box-shadow:inset 0 0 0 2px var(--accent)}100%{background:transparent;box-shadow:none}}.stbar.stbar{display:flex;gap:16px;align-items:center;background:var(--bg);border-radius:12px;box-shadow:var(--shadow-1);padding:12px 16px;margin:0 0 12px}.stbar .btn.primary{padding:8px 16px;border:0}.stchips{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.stchips .stlab{font-size:12px;color:var(--fg3);margin-right:2px}.stsend{display:inline-flex;flex-direction:row-reverse;align-items:center;gap:12px}.stsend .s{white-space:nowrap}ol.l5{list-style:none;margin:12px 0;padding:0}.l5s{display:flex;gap:10px;padding:10px 0;border-top:1px solid var(--line2)}.l5n{width:22px;height:22px;border-radius:11px;background:var(--line);color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center;flex:none}.l5s.now .l5n{background:var(--accent)}.ncl{list-style:none;margin:12px 0 0;padding:0}.ncl li{padding:12px 0;border-top:1px solid var(--line2)}.ncl-h{display:flex;gap:12px;justify-content:space-between;align-items:baseline}.ncl-t{font-weight:500;min-width:0;overflow-wrap:anywhere}.ncl .oact{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}.ctbl col.w-status{width:170px}.ctbl col.w-setup{width:250px}.ctbl col.w-launch{width:170px}.ctbl col.w-dstack{width:230px}
@@ -1018,7 +1018,49 @@ function signal(c){
   return'Monitor';
 }
 function whiteSpace(c){return TR(c)&&!OTHER(c)&&(c.vol||0)>=500&&!bucketed(c)&&c.target==='Not'}
-const childColl=c=>c.entity.status==='Child collection'?c.entity.items.find(e=>e.type==='collection'&&e.active):null;
+const childColl=c=>{const s=entSlot(c,'coll');return s.state==='found'?{id:s.id,name:s.name}:null};
+/* Entity slots (Krupa and Anuj, 19 Nov): the page type says whether a cluster needs a child collection and a POI. Each slot
+   is filled from the cluster's live page first, then by name; growth can pick another of the CE's entities, ask for one to
+   be created, or mark it not needed. Launch creates only what is still missing. S.ent["<id>|coll"|"<id>|poi"] holds an
+   entity id, 'new' or 'none'. */
+const CE_ENTS=()=>D.ce.entities||[];
+// POIs carry no active flag in dim_pois, so only a collection marked inactive counts as inactive.
+const entLive=e=>e&&!(e.type==='collection'&&e.active===false);
+const pageTagIds=(c,type)=>c.pages.flatMap(p=>{
+  if(type==='collection')return p.collection&&String(p.collection)!==String(D.ce.id)?[String(p.collection)]:[];
+  const m=String(p.tag||'').match(/^POI (\d+)/);return m?[m[1]]:[]});
+function entSlot(c,kind){
+  const type=kind==='coll'?'collection':'poi', rule=(ENT[pageTypeOf(c)]||{})[kind]||'none', key=`${c.id}|${kind}`, ov=S.ent[key];
+  const nameOf=id=>(CE_ENTS().find(e=>e.type===type&&String(e.id)===String(id))||c.entity.items.find(e=>e.type===type&&String(e.id)===String(id))||{}).name||'';
+  const base={kind,type,rule,need:rule==='create',key}, made=S.lstate[c.id]==='launched';
+  if(ov==='none')return{...base,state:'none',by:'you'};
+  if(ov==='new')return{...base,state:made?'created':'new',by:'you'};
+  if(ov)return{...base,state:'found',id:String(ov),name:nameOf(ov),how:'picked'};
+  const pg=pageTagIds(c,type)[0];
+  if(pg)return{...base,state:'found',id:pg,name:nameOf(pg),how:'page'};
+  const m=c.entity.items.find(e=>e.type===type&&entLive(e));
+  if(m)return{...base,state:'found',id:String(m.id),name:m.name,how:'name'};
+  // No page and none planned (own page No): nothing for an entity to serve.
+  if(rule!=='create'||(!c.pages.length&&!made&&sepOf(c)!=='yes'))return{...base,state:'none'};
+  if(made)return{...base,state:'created'};
+  return{...base,state:c.pages.length?'gap':'new'}}
+const entNeeded=c=>['coll','poi'].some(k=>{const s=entSlot(c,k);return s.need&&s.state!=='none'});
+const entOk=c=>['coll','poi'].every(k=>{const s=entSlot(c,k);return !s.need||['found','created','none'].includes(s.state)});
+function entPick(c,s,label){
+  const L=CE_ENTS().filter(e=>e.type===s.type), what=s.type==='poi'?'POI':'collection';
+  const opts=L.map(e=>`<option value="${esc(String(e.id))}"${String(e.id)===String(s.id)?' disabled':''}>${esc(String(e.id))} · ${esc(e.name)}${e.active===false&&e.type==='collection'?' (inactive)':''}</option>`).join('');
+  const extra=[s.state!=='new'&&s.state!=='created'?`<option value="__new">+ Create new ${what}</option>`:'',
+    s.state!=='none'?'<option value="__none">Not needed</option>':'',S.ent[s.key]!==undefined?'<option value="__auto">Back to the filled-in answer</option>':''].join('');
+  return `<select class="esel" data-entpick="${s.key}" aria-label="${label} ${what} for ${esc(nm(c))}"><option value="">${label} ▾</option>${opts}${extra}</select>`}
+function entLine(c,kind){const s=entSlot(c,kind), L=kind==='coll'?'Collection':'POI', ns=t=>`<span class="s">${t}</span>`;
+  if(s.state==='found')return['done',`${L}: ${s.id}${s.name?' · '+s.name:''}`,ns(s.how==='page'?'from its page':s.how==='name'?'matched by name · check':'picked by you')+entPick(c,s,'Change')];
+  if(s.state==='created')return['done',`${L}: created`,s.by?ns('asked by you'):''];
+  if(s.state==='none')return['na',`${L}: not needed`,s.by?ns('set by you')+entPick(c,s,'Change'):`<button class="lnk s" data-entset="${s.key}|new">Create anyway</button>`];
+  if(s.state==='gap')return['warn',`${L}: none · its page lists the CE collection`,entPick(c,s,'Pick')+`<button class="lnk s" data-entset="${s.key}|new">Create new</button>`];
+  return['todo',`${L}: to create on Launch`,ns(s.by?'asked by you':kind==='coll'?`type keyword, under ${esc(String(D.ce.id))}`:"under the CE's POI")+entPick(c,s,'Pick')]}
+function entLines(c){const a=entSlot(c,'coll'),b=entSlot(c,'poi');
+  if(a.state==='none'&&b.state==='none'&&!a.by&&!b.by)return[['na','Entity: not needed',`<select class="esel" data-entpick="${c.id}|any" aria-label="Create an entity anyway for ${esc(nm(c))}"><option value="">Create anyway ▾</option><option value="coll">A child collection</option><option value="poi">A POI</option></select>`]];
+  return[entLine(c,'coll'),entLine(c,'poi')]}
 
 /* ---------- Metric definitions, read by header tooltips ---------- */
 const G={
@@ -1104,7 +1146,7 @@ const isHome=path=>/^\/([a-z]{2}\/)?$/.test(path||'')||(!!D.ce.home&&D.ce.home!=
 // Buying clusters are where growth decides first (Parag, 10 Nov), so the intent filter opens on Transactional.
 const S={aview:'clusters',oppfilter:'open',pcard:null,kwOpen:false,mode:'analysis',chip:null,type:'all',sort:{key:'status',dir:1},psort:{key:'vol',dir:-1},q:'',sel:null,dtab:'kw',dfam:null,dq:'',dfilter:'all',dctx:null,pflt:null,
   sep:{},contentCall:{},stf:null,perfMark:{},hold:{},L:{},perfAt:{},contentAt:{},oppSent:{},perfReview:false,mergeAsk:null,moves:{},merged:{},names:{},intents:{},intentAsk:null,renaming:false,pstat:{},ptype:{},slug:{},sent:null,log:[],
-  layer:null,seeds:null,leave:[],leaveSug:new Set(),stab:'kw',partners:null,assign:{},cflt:null,open:new Set(),perfPick:{},supply:{},parent:{},closed:new Set(),comments:{},view:'list',pexp:new Set(),stAll:new Set(),oppState:{},oppc:null,opptype:'all',oppall:null,launch:null,launched:{},pagepop:null,kwfam:new Set(),agopen:new Set(),edit:false,kwAll:new Set(),kwAdd:{},focusWas:{},focusOk:{},flagOk:{},reviewed:null,sends:[],sentSig:{},lstate:{},lconfirm:null,types:new Set(['TRANSACTIONAL']),pageMap:{},pick:new Set(),kwSel:new Set(),kwMoveOpen:null,kwAddOpen:false,kwq:'',kwSug:[],uncAssign:{},th:JSON.parse(JSON.stringify({cover:{TRANSACTIONAL:.10,INFORMATIONAL:.05},minSearches:1000,conv:10,roi:1.4,lossSpend:50,newCE:false})),deleted:{},sepOk:{},subd:{},ask:{},subdUrl:{}};
+  layer:null,seeds:null,leave:[],leaveSug:new Set(),stab:'kw',partners:null,assign:{},cflt:null,open:new Set(),perfPick:{},supply:{},parent:{},closed:new Set(),comments:{},view:'list',pexp:new Set(),stAll:new Set(),oppState:{},oppc:null,opptype:'all',oppall:null,launch:null,launched:{},pagepop:null,kwfam:new Set(),agopen:new Set(),edit:false,kwAll:new Set(),kwAdd:{},focusWas:{},focusOk:{},flagOk:{},reviewed:null,sends:[],sentSig:{},lstate:{},lconfirm:null,types:new Set(['TRANSACTIONAL']),pageMap:{},pick:new Set(),kwSel:new Set(),kwMoveOpen:null,kwAddOpen:false,kwq:'',kwSug:[],uncAssign:{},th:JSON.parse(JSON.stringify({cover:{TRANSACTIONAL:.10,INFORMATIONAL:.05},minSearches:1000,conv:10,roi:1.4,lossSpend:50,newCE:false})),deleted:{},sepOk:{},subd:{},ask:{},subdUrl:{},ent:{}};
 try{S.view=localStorage.getItem('clusters-view')||'list'}catch(e){}
 const PREVIEW_NEW=/[?&]preview=newce/.test(location.search);
 if(PREVIEW_NEW)C.forEach(c=>{c.adg={state:'missing'};c.clicks=0;c.spend=0;c.google_value=0;c.cm1=0;c.impr=0;c.roi=null;c.cpc=null;c.rpc=null;c.target='Not';c.theme=null;c.land=null;c.pages=[];c.organic={clicks:0,impr:0,position:null};c.oc=0});
@@ -1138,8 +1180,8 @@ const toPerf=c=>c.id in S.perfPick?S.perfPick[c.id]:typeOf(c)==='TRANSACTIONAL';
 const toContent=c=>!OTHER(c)&&!S.merged[c.id]&&!S.deleted[c.id]&&!c.pages.length&&sepConfirmed(c)&&sepOf(c)==='yes';
 
 /* ---------- Analysis table: one flat set of columns; detail lives in the drawer ---------- */
-const entCell=c=>{const cc=childColl(c),p=c.entity.items.find(e=>e.type==='poi');
-  return cc?`<span class="cell"><span>${esc(cc.name)}</span><span class="s">Child collection</span></span>`:c.entity.status==='POI only'?`<span class="cell"><span>${esc(p?.name||'')}</span><span class="s">POI only</span></span>`:'<span class="dim">CE collection</span>'};
+const entCell=c=>{const a=entSlot(c,'coll'),b=entSlot(c,'poi'),f=[a,b].filter(s=>s.state==='found');
+  return f.length?`<span class="cell"><span>${f.map(s=>esc(s.name||s.id)).join(' · ')}</span><span class="s">${f.map(s=>s.type==='poi'?'POI':'Child collection').join(' · ')}</span></span>`:'<span class="dim">CE collection</span>'};
 const money2=v=>v==null?'–':'$'+v.toFixed(2);
 /* [metric key, class, drawer tab, render, 'paid' when it needs ads data, picker group when optional] */
 /* The cluster's main page: home for the CE's head term (EOS marks it only in the name), otherwise the page whose path
@@ -1178,11 +1220,11 @@ function pageCell(c){
    bids on it. Volume counts each close-variant family once. */
 /* Set-up a cluster needs before it is live. Planning and informational clusters only need a page. */
 const SETUP=[
- ['entity','Headout entity',c=>c.entity.status==='Child collection'],
+ ['entity','Headout entity',c=>entOk(c)],
  ['page','Page',c=>c.pages.length>0],
  ['products','Products selling',c=>prodState(c).yes],
  ['adgroup','Own ad group',c=>ownAgShare(c)>=.5]];
-const stepsOf=c=>OTHER(c)?[]:SETUP.filter(st=>TR(c)||st[0]==='page');
+const stepsOf=c=>OTHER(c)?[]:SETUP.filter(st=>(TR(c)||st[0]==='page')&&(st[0]!=='entity'||entNeeded(c)));
 const LAUNCH_OF={entity:'entity',page:'page',products:'products'};
 const doneOf=c=>stepsOf(c).filter(st=>st[2](c)||['done','exists'].includes(S.launched[c.id]?.res[LAUNCH_OF[st[0]]]?.state));
 const stageTxt=c=>{const all=stepsOf(c),d=doneOf(c);if(!all.length)return'';if(d.length===all.length)return '<span class="stage ok" title="Set up: '+all.map(st=>st[1]).join(', ')+'">Set up</span>';
@@ -1239,10 +1281,7 @@ const ptLabel=t=>String(t).replace(/^(Non-)?POI:\s*/,'').replace(/_/g,'-');
 function setupSteps(c){
   if(OTHER(c))return[];
   const pt=pageTypeOf(c), R=ENT[pt]||{coll:'none',poi:'none'}, ls=S.lstate[c.id], L=[['done',`Page type: ${ptLabel(pt)}`]];
-  if(TR(c)){const cc=childColl(c), poi=c.entity?.items?.find(e=>e.type==='poi');
-    const need=[R.coll==='create'&&'collection',R.poi==='create'&&'POI'].filter(Boolean), have=need.filter(x=>x==='collection'?cc:poi), miss=need.filter(x=>!have.includes(x));
-    L.push(!need.length?['na','Entity: not needed']:ls==='launched'||!miss.length?['done',`Entity: ${ls==='launched'?'created':have.join(' and ')+' exists'}`]
-      :[have.length?'warn':'todo',`Entity: ${have.length?have.join(' and ')+' exists · ':''}${miss.join(' and ')} to create`])}
+  if(TR(c))L.push(...entLines(c));
   const mp=mainPage(c);
   L.push(c.pages.length?['done',`MB page: live, ${pathOf(mp||c.pages[0])}`]:ls==='launched'?['done','MB page: launched']:ls==='queued'?['now','MB page: launching']
     :S.sentContent?.has(c.id)?['now','MB page: with content']:sepOf(c)==='yes'?['todo','MB page: none']:['na','MB page: none needed']);
@@ -1252,10 +1291,12 @@ function setupSteps(c){
       L.push(sh>=.5?['done',`Ad group: own, ${pct(sh)} of clicks`]:a.state==='focus'?['warn','Ad group: focus keyword only']:a.ag?['warn',`Ad group: exists, ${pct(sh)} of clicks`]:['todo','Ad group: none of its own'])}}
   return L}
 // Each Set-up step jumps to the column in the same row that holds its detail (opening that column's group if needed).
-const SGO=[[/^Entity:/,'ent'],[/^MB page:/,'page'],[/^Experiences:/,'prod'],[/^Ad group:/,'own']];
+const SGO=[[/^(Entity|Collection|POI):/,'ent'],[/^MB page:/,'page'],[/^Experiences:/,'prod'],[/^Ad group:/,'own']];
 const setupCell=c=>{const L=setupSteps(c);if(!L.length)return '<span class="dim">–</span>';
-  return `<span class="setup">${L.map(([st,t])=>{const go=(SGO.find(([re])=>re.test(t))||[])[1], ic=`<i aria-hidden="true">${st==='done'?'✓':st==='warn'?'!':st==='na'?'–':''}</i>`;
-    return go&&COLBY[go]?`<button class="sstep su-${st} sgo" data-sgo="${go}|${c.id}" title="Go to ${esc(G[go]?.[0]||go)} in this row">${ic}<span>${esc(t)}</span></button>`:`<span class="sstep su-${st}">${ic}<span>${esc(t)}</span></span>`}).join('')}</span>`};
+  return `<span class="setup">${L.map(([st,t,x])=>{const go=(SGO.find(([re])=>re.test(t))||[])[1], ic=`<i aria-hidden="true">${st==='done'?'✓':st==='warn'?'!':st==='na'?'–':''}</i>`;
+    const step=go&&COLBY[go]?`<button class="sstep su-${st} sgo" data-sgo="${go}|${c.id}" title="Go to ${esc(G[go]?.[0]||go)} in this row">${ic}<span>${esc(t)}</span></button>`:`<span class="sstep su-${st}">${ic}<span>${esc(t)}</span></span>`;
+    // Pick, change and create sit beside the step, outside its jump button.
+    return x?`<span class="sline">${step}<span class="sacts">${x}</span></span>`:step}).join('')}</span>`};
 /* Launch per cluster (Parag, 10 Nov): page types whose entities follow from the type launch in one click (entities,
    MB page shell and experience mapping in the background); the rest go to content to check the page type first. */
 const LAUNCH_DIRECT=new Set(['Tours','Guided Tours','Private Tours','Audio Guide Tours','Combos','Non-POI: Area','Non-POI: Sub_experience','Non-POI: A-to-B Day Trip','Landing Page']);
@@ -1778,11 +1819,11 @@ function launchStep(){
 /* ---------- Execution (content): one row per cluster with a confirmed own page and no page yet. Content cross-checks the
    page type; collection and POI follow the page planning rules, fetched when they exist and created when they don't;
    the subfolder slug is content's, the subdomain is growth's. Launch hands the plan to the agent (stand-in). ---------- */
-function entCellX(c,kind){const rule=ENT[pageTypeOf(c)][kind],ex=kind==='coll'?childColl(c):c.entity?.items?.find(e=>e.type==='poi');
-  if(rule==='none')return '<span class="pill mute">Not needed</span>';
-  if(ex)return `<span class="pill ok" title="${esc(ex.name)}">Exists · ${esc(String(ex.id??ex.name))}</span>`;
-  if(S.lstate[c.id]==='launched')return rule==='optional'?'<span class="pill mute">Skipped</span>':'<span class="pill ok">Created</span>';
-  return rule==='optional'?'<span class="pill warn">Optional</span>':'<span class="pill acc">Will create</span>'}
+function entCellX(c,kind){const s=entSlot(c,kind);
+  if(s.state==='found')return `<span class="pill ok" title="${esc(s.name||'')}">Exists · ${esc(s.id)}</span>`;
+  if(s.state==='created')return '<span class="pill ok">Created</span>';
+  if(s.state==='none')return `<span class="pill mute">${s.rule==='optional'?'Optional':'Not needed'}</span>`;
+  return '<span class="pill acc">Will create</span>'}
 const slugOf=c=>S.slug[c.id]||slugify(focusLabel(c)||nm(c));
 // A subfolder slug: lower case, hyphens, slashes only between parts. "/Kayak Tours/" → "/kayak-tours".
 const cleanSlug=v=>'/'+String(v||'').trim().toLowerCase().replace(/^\/+|\/+$/g,'').split('/').map(x=>x.replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')).filter(Boolean).join('/');
@@ -2244,10 +2285,12 @@ function noPageSection(){
    </tbody></table></div></section>`;
 }
 /* ---------- Launch confirm: the plan the page planning rules produce, shown before anything is created. ---------- */
-function planOf(c){const t=pageTypeOf(c),R=ENT[t],cc=childColl(c),poi=c.entity?.items?.find(e=>e.type==='poi'),L=[];
-  if(R.coll!=='none')L.push(cc?`Use collection ${esc(cc.name)} (${esc(String(cc.id??''))})`:R.coll==='optional'?'Child collection optional for this page type':'Create the child collection');
-  if(R.poi!=='none')L.push(poi?`Use POI ${esc(poi.name)}; check it is mapped to the parent POI`:'Create the POI, map it to the parent POI, fill schedule and location');
-  if(/Sub-attraction [BC]/.test(t))L.push('Check the collection ranking for the city (header mapping)');
+function planOf(c){const t=pageTypeOf(c),R=ENT[t],a=entSlot(c,'coll'),b=entSlot(c,'poi'),kw=focusLabel(c)||nm(c),L=[];
+  if(a.state==='found')L.push(`Use collection ${esc(a.name||'')} (${esc(a.id)})`);
+  else if(['new','gap'].includes(a.state))L.push(`Create the child collection (type keyword) under ${esc(String(D.ce.id))} for “${esc(kw)}”`);
+  if(b.state==='found')L.push(`Use POI ${esc(b.name||'')} (${esc(b.id)}); check it is mapped to the parent POI`);
+  else if(['new','gap'].includes(b.state))L.push('Create the POI, map it to the parent POI, fill schedule and location');
+  if(/Sub-attraction [BC]/i.test(t))L.push('Check the collection ranking for the city (header mapping)');
   L.push(`Launch the subfolder at ${esc(slugOf(c))}`);
   if(S.subd[c.id])L.push(`Create the subdomain ${esc(subdUrlOf(c))} and point it at the subfolder`);
   L.push(`Products fetched by ${R.fetch}`);L.push('Raise the content brief: copy, media, localisation');return L}
@@ -2621,9 +2664,11 @@ function act(sel,el){
     S.parent[c.id]=to;logChange(to?`Put <b>${esc(nm(c))}</b> under ${esc(nm(byId[to]))}`:`Took <b>${esc(nm(c))}</b> out of ${esc(from?nm(byId[from]):'its parent')}`,()=>{if(was===undefined)delete S.parent[c.id];else S.parent[c.id]=was})}
 }
 document.addEventListener('click',e=>{
-  const t=e.target.closest('[data-sgo],[data-vmenu],[data-l5],[data-hold],[data-oppsend],[data-stall],[data-assignok],[data-askaside],[data-mode],[data-chip],[data-row],[data-close],[data-dtab],[data-dfilter],[data-ssort],[data-dfam],[data-dfamclear],[data-mergeok],[data-mergeno],[data-stf],[data-tocontent],[data-tocontentall],[data-pmark],[data-perfreview],[data-clearsaved],[data-leaveok],[data-leaveno],[data-cell],[data-ptheme],[data-pclear],[data-layer],[data-undo],[data-seedadd],[data-seeddel],[data-leaveadd],[data-leavedel],[data-rerun],[data-pagelaunch],[data-sendperf],[data-intentok],[data-intentno],[data-renameok],[data-renameno],[data-grp],[data-kwfam],[data-agopen],[data-pagepop],[data-pageclose],[data-launch],[data-lclose],[data-lstart],[data-lans],[data-lfinish],[data-oppc],[data-oppall],[data-oppok],[data-oppno],[data-opptype],[data-allgroups],[data-type],[data-sort],[data-psort],[data-par],[data-cmtadd],[data-cmtdel],[data-copy],[data-view],[data-pexp],[data-stab],[data-partneradd],[data-partnerdel],[data-edit],[data-mergesel],[data-delsel],[data-sepok],[data-sepset],[data-askok],[data-askundo],[data-sepundo],[data-oppundo],[data-aview],[data-oppbulk],[data-oppfilter],[data-gogate],[data-pcard],[data-kwall],[data-kwadd],[data-kwact],[data-kwaddopen],[data-kwbulkremove],[data-kwbulkclear],[data-renamestart],[data-kwsug],[data-uncnew],[data-uncleave],[data-threset],[data-flagundo],[data-flagmove],[data-reviewed],[data-send],[data-copypkg],[data-golaunch],[data-launchall],[data-flagsup],[data-lcancel],[data-lgo],[data-itype]');
+  const t=e.target.closest('[data-entset],[data-sgo],[data-vmenu],[data-l5],[data-hold],[data-oppsend],[data-stall],[data-assignok],[data-askaside],[data-mode],[data-chip],[data-row],[data-close],[data-dtab],[data-dfilter],[data-ssort],[data-dfam],[data-dfamclear],[data-mergeok],[data-mergeno],[data-stf],[data-tocontent],[data-tocontentall],[data-pmark],[data-perfreview],[data-clearsaved],[data-leaveok],[data-leaveno],[data-cell],[data-ptheme],[data-pclear],[data-layer],[data-undo],[data-seedadd],[data-seeddel],[data-leaveadd],[data-leavedel],[data-rerun],[data-pagelaunch],[data-sendperf],[data-intentok],[data-intentno],[data-renameok],[data-renameno],[data-grp],[data-kwfam],[data-agopen],[data-pagepop],[data-pageclose],[data-launch],[data-lclose],[data-lstart],[data-lans],[data-lfinish],[data-oppc],[data-oppall],[data-oppok],[data-oppno],[data-opptype],[data-allgroups],[data-type],[data-sort],[data-psort],[data-par],[data-cmtadd],[data-cmtdel],[data-copy],[data-view],[data-pexp],[data-stab],[data-partneradd],[data-partnerdel],[data-edit],[data-mergesel],[data-delsel],[data-sepok],[data-sepset],[data-askok],[data-askundo],[data-sepundo],[data-oppundo],[data-aview],[data-oppbulk],[data-oppfilter],[data-gogate],[data-pcard],[data-kwall],[data-kwadd],[data-kwact],[data-kwaddopen],[data-kwbulkremove],[data-kwbulkclear],[data-renamestart],[data-kwsug],[data-uncnew],[data-uncleave],[data-threset],[data-flagundo],[data-flagmove],[data-reviewed],[data-send],[data-copypkg],[data-golaunch],[data-launchall],[data-flagsup],[data-lcancel],[data-lgo],[data-itype]');
   if(!t||e.target.closest('select,input'))return;const d=t.dataset;
-  if(d.edit!==undefined){S.edit=!S.edit;S.pick.clear();S.kwSel.clear();S.kwMoveOpen=null;S.kwAddOpen=false;S.renaming=false;S.layer=null}
+  if(d.entset!==undefined){const [cid,kind,v]=d.entset.split('|'),c=byId[cid],key=`${cid}|${kind}`,had=key in S.ent,was=S.ent[key];S.ent[key]=v;
+    logChange(`${kind==='poi'?'POI':'Collection'} for <b>${esc(nm(c))}</b>: create new on Launch`,()=>{if(had)S.ent[key]=was;else delete S.ent[key]})}
+  else if(d.edit!==undefined){S.edit=!S.edit;S.pick.clear();S.kwSel.clear();S.kwMoveOpen=null;S.kwAddOpen=false;S.renaming=false;S.layer=null}
   else if(d.mergesel!==undefined){const L=[...S.pick].map(id=>byId[id]);if(mergeIntents(L).length>1||mergeLosses(L).length)S.mergeAsk=[...S.pick];else{mergeClusters(L);S.pick.clear()}}
   else if(d.clearsaved!==undefined){if(confirm(`Clear every saved decision for ${D.ce.name} in this browser? This cannot be undone.`))clearSaved();return}
   else if(d.stf!==undefined){S.stf=d.stf&&S.stf!==d.stf?d.stf:null}
@@ -2842,6 +2887,11 @@ document.addEventListener('change',e=>{const t=e.target, d=t.dataset;
     if(v===was){render();return}S.slug[c.id]=v;logChange(`Subfolder slug for <b>${esc(nm(c))}</b>: ${esc(was)} → ${esc(v)} (content)`,()=>{delete S.slug[c.id]})}
   else if(d.assign){S.assign[d.assign]=t.value}
   else if(d.partner!==undefined){const x=partnerList()[+d.partner],was=x.real;x.real=t.value;S.log.unshift({text:`${esc(x.name)}: ${t.value==='yes'?'cluster it':'not real'}`,seed:true,at:new Date(),undo:()=>{x.real=was}})}
+  else if(d.entpick){const cut=d.entpick.lastIndexOf('|'),c=byId[d.entpick.slice(0,cut)],kind0=d.entpick.slice(cut+1),v=t.value;if(!v||!c)return;
+    // The single "Entity: not needed" line asks which slot to create; the per-slot pickers set that slot.
+    const kind=kind0==='any'?v:kind0,key=`${c.id}|${kind}`,had=key in S.ent,was=S.ent[key],to=kind0==='any'?'new':v==='__new'?'new':v==='__none'?'none':v==='__auto'?undefined:v;
+    if(to===undefined)delete S.ent[key];else S.ent[key]=to;const what=kind==='poi'?'POI':'Collection';
+    logChange(`${what} for <b>${esc(nm(c))}</b>: ${to===undefined?'back to the filled-in answer':to==='new'?'create new on Launch':to==='none'?'not needed':esc(to)}`,()=>{if(had)S.ent[key]=was;else delete S.ent[key]})}
   else if(d.supply){const c=byId[d.supply],was=S.supply[c.id]||'';S.supply[c.id]=t.value;logChange(`Supply for <b>${esc(nm(c))}</b>: ${t.value?SUPPLY[t.value]:'not set'}`,()=>{S.supply[c.id]=was})}
   else if(d.perfall!==undefined){const L=live().filter(c=>!OTHER(c)),on=t.checked,was={...S.perfPick};L.forEach(c=>{S.perfPick[c.id]=on});logChange(on?`Ticked all ${L.length} clusters for Perf`:'Unticked every cluster for Perf',()=>{S.perfPick=was})}
   else if(d.perfpick){const c=byId[d.perfpick];S.perfPick[c.id]=t.checked;logChange(`${t.checked?'Added':'Took out'} <b>${esc(nm(c))}</b> ${t.checked?'to':'of'} the Perf hand-off`,()=>{delete S.perfPick[c.id]})}
@@ -2856,7 +2906,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='cmtin
 const STATE_KEY='clusters-state-'+D.ce.id;
 const KEEP=['sep','ask','supply','oppState','assign','flagOk','reviewed','moves','merged','deleted','names','intents','ptype','slug','subd','subdUrl',
   'sends','sentContent','sentPerf','sentSig','lastSnap','lstate','contentCall','leave','leaveSug','kwAdd','focusOk','focusWas','sepOk','th','pageMap',
-  'uncAssign','pstat','perfPick','seeds','mergeOps','perfMark','hold','L','perfAt','contentAt','oppSent'];
+  'uncAssign','pstat','perfPick','seeds','mergeOps','perfMark','hold','L','perfAt','contentAt','oppSent','ent'];
 const SETS=new Set(['sentContent','sentPerf','leaveSug']);
 const normName=v=>String(v||'').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
 let saveT=null;

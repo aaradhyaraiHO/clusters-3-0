@@ -111,12 +111,54 @@ else:
     hsup = pd.DataFrame(columns=["cid", "experience_id", "experience_name", "live", "revenue_usd", "orders"])
     hent = pd.DataFrame(columns=["cid", "entity_type", "entity_id", "name", "is_active"])
 
+# The CE's child collections and POIs (pull_ce.py: entities). Vatican's come from the cluster_sources run above.
+ENTS_FILE = OUT / f"entities_{CE}.csv"
+# bq writes an empty file, not a header, when a CE has no child collections or POIs.
+ents = pd.read_csv(ENTS_FILE, dtype={"entity_id": str}) if ENTS_FILE.exists() and ENTS_FILE.stat().st_size else pd.DataFrame(
+    columns=["entity_type", "entity_id", "name", "is_active"])
+# Words that name the CE or a product format say nothing about which cluster an entity belongs to.
+ENT_GENERIC = {"the", "and", "for", "from", "with", "tickets", "ticket", "tours", "tour", "cruise", "trip", "day", "official", "best", "combo", "general"}
+
+
+def ent_toks(text, drop):
+    out = set()
+    for w in re.split(r"[^a-z0-9]+", unicodedata.normalize("NFKD", str(text).lower()).encode("ascii", "ignore").decode()):
+        w = w[:-1] if len(w) > 4 and w.endswith("s") and not w.endswith("ss") else w
+        if len(w) > 2 and w not in drop:
+            out.add(w)
+    return out
+
+
+# An entity belongs to a cluster when all its distinctive name words are in the cluster's name, or in at least a
+# quarter of its keywords: one stray keyword must not tie a cluster to a place (cluster_sources.py's ENTITY_SHARE).
+if SOURCES is None and len(ents):
+    drop = ENT_GENERIC | {ent_toks(w, set()).pop() for w in CFG.get("name_words", []) if ent_toks(w, set())}
+    kw_toks = kw.groupby("cid")["kw"].agg(lambda s: [ent_toks(k, drop) for k in s.dropna()])
+    links = []
+    for cid, ks in kw_toks.items():
+        if norm(names.at[cid, "name"]) == norm(CFG.get("head", "")):
+            continue
+        name_t = ent_toks(names.at[cid, "name"], drop)
+        for e in ents.itertuples():
+            et = ent_toks(e.name, drop)
+            if et and (et <= name_t or (ks and sum(et <= k for k in ks) / len(ks) >= 0.25)):
+                links.append({"cid": cid, "entity_type": e.entity_type, "entity_id": e.entity_id, "name": e.name, "is_active": e.is_active})
+    hent = pd.DataFrame(links, columns=["cid", "entity_type", "entity_id", "name", "is_active"])
+    col = hent[(hent["entity_type"] == "collection") & hent["is_active"].astype(str).eq("True")].groupby("cid").size()
+    poi = hent[hent["entity_type"] == "poi"].groupby("cid").size()
+    hsrc = pd.DataFrame({"entity_status": ["Child collection" if c in col.index else "POI only" for c in sorted(set(col.index) | set(poi.index))]},
+                        index=pd.Index(sorted(set(col.index) | set(poi.index)), name="cid"))
+    print(f"entities: {len(ents)} under the CE; {hent['cid'].nunique()} clusters linked to one")
+
 # Pages tagged in Payload with a place (a POI, or a collection other than the CE's own) go to a cluster about that place
 # (Parag, 30 Oct: link by metadata, not text). Candidates are clusters whose Headout entities include the tag, or whose
 # name holds the tag's distinctive words; the text mapper's pick stands if it is one of them, else the candidate that
 # shares most words with the page path. Untagged pages keep the text mapping.
-ROOT_IDS = {"poi": {"1"}, "collection": {"189", "3945"}}
+ROOT_IDS = {"poi": {"1"}, "collection": {"189", "3945", str(CE)}}
 tag_names = pd.read_csv(HERE / "hybrid" / "page_entities.csv", dtype=str).set_index(["entity_type", "entity_id"])["name"]
+if len(ents):
+    tag_names = pd.concat([tag_names, ents.astype({"entity_id": str}).set_index(["entity_type", "entity_id"])["name"]])
+    tag_names = tag_names[~tag_names.index.duplicated(keep="last")]
 TAG_GENERIC = {"the", "of", "city", "vatican", "museums", "museum", "milford", "sound", "tickets", "and", "palace", "apostolic"}
 # Trailing "s" dropped so a path's "peters" meets a name's "Peter's".
 tag_words = lambda t: {w[:-1] if len(w) > 4 and w.endswith("s") else w
@@ -828,7 +870,11 @@ ce.update({"search_terms_shown": r(st_shown, 3), "weeks": [str(w) for w in weeks
            # The CE's own Google Ads totals and live keywords, account-wide: the header reads these, not a sum over clusters
            # (clusters share searches), and a search that is already a live keyword anywhere is never suggested as one to add.
            "paid": {"clicks": r(totals["clicks"].sum()), "spend": r(totals["spend"].sum(), 2), "conv_value": r(totals["conv_value"].sum(), 2)},
-           "live_keywords": sorted(kw_ags.index), "home_funnel": page_funnel(HOME_PATH), "paid_revenue_traced": r(traced_share, 3), "clusters_from": "hybrid_eos_v5" if CE == 189 else "hybrid_11ce"})
+           "live_keywords": sorted(kw_ags.index), "home_funnel": page_funnel(HOME_PATH), "paid_revenue_traced": r(traced_share, 3), "clusters_from": "hybrid_eos_v5" if CE == 189 else "hybrid_11ce",
+           # Every child collection and POI under the CE, so Set-up can name the entity a live page lists.
+           "entities": [{"type": x.entity_type, "id": str(x.entity_id), "name": x.name, "active": str(x.is_active) == "True"} for x in ents.itertuples()]})
+if len(ents):
+    ce["banner"] = ce.get("banner", "").replace(", Headout entities.", ".")
 data = {"ce": ce, "clusters": clusters, "page_shows": shows, "pages_no_cluster": [{"path": x.url, "type": x.page_sub_type, "focus": x.text, "revenue": r(x.revenue, 2)}
                              for x in hpages[hpages["cid"].isna()].sort_values("revenue", ascending=False).itertuples()],
         "uncaptured": [{"name": x._3, "intent": x.Intent, "searches": x.Searches, "paid_impr": r(x._6), "organic_impr": r(x._7),
