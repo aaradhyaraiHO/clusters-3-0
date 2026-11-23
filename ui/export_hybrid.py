@@ -200,6 +200,17 @@ real_cids = [c for c in names.index if not str(names.at[c, "name"]).startswith("
 HEAD_CIDS = {c for c in real_cids if "head term" in str(names.at[c, "name"]).lower() or norm(names.at[c, "name"]) == norm(HEAD_NAME or "")}
 operator_cid = next((c for c in real_cids if OPERATOR_RE.search(str(names.at[c, "name"])) and not re.search(r"brand\s*&\s*trust", str(names.at[c, "name"]), re.I)), None)
 cname_t = {c: toks(names.at[c, "name"]) for c in real_cids}
+
+
+def operator_cluster(e):
+    """The cluster that names this operator ("Realnz Milford Sound Cruise" for RealNZ), else a combined operator
+    cluster ("Cruise Operators & Companies"), else none. Ties go to the shortest name, then volume."""
+    own = [c for c in real_cids if c not in HEAD_CIDS and squash(e.name) in squash(names.at[c, "name"])]
+    if own:
+        return min(own, key=lambda c: (len(cname_t[c]), -kw.loc[kw["cid"] == c, "vol"].max()))
+    return operator_cid
+
+
 kw_toks = kw.groupby("cid")["kw"].agg(lambda s: [toks(k) for k in s.dropna()])
 
 
@@ -230,11 +241,30 @@ for cid in real_cids:
             continue
         if sum(e.kwords <= k for k in ks) / len(ks) >= 0.25:
             links.append({"cid": cid, "entity_type": e.entity_type, "entity_id": e.entity_id, "name": e.name, "is_active": e.is_active, "from": "keywords"})
-if operator_cid is not None:
-    for e in ents[ents["operator"]].itertuples():
-        links.append({"cid": operator_cid, "entity_type": e.entity_type, "entity_id": e.entity_id, "name": e.name, "is_active": e.is_active, "from": "operator"})
+for e in (ents[ents["operator"]].itertuples() if len(ents) else []):
+    oc = operator_cluster(e)
+    if oc is not None:
+        links.append({"cid": oc, "entity_type": e.entity_type, "entity_id": e.entity_id, "name": e.name, "is_active": e.is_active, "from": "operator"})
 hent = pd.DataFrame(links, columns=["cid", "entity_type", "entity_id", "name", "is_active", "from"])
 hent = hent[~((hent["entity_type"] == "collection") & ~hent["is_active"].astype(bool))]
+# Which products each collection's ranking lists; a collection whose products mostly do not name the CE is about another
+# place (Doubtful Sound Cruises under Milford Sound).
+_pp = pd.read_csv(OUT / f"page_products_{CE}.csv", dtype={"collection_id": str}, usecols=["collection_id", "experience_name"])
+# The CE's first name word ("milford", "vatican"): "sound" alone would count Doubtful Sound's products as Milford's.
+CE_WORD = fold(re.split(r"[^A-Za-z0-9]+", "Vatican" if CE == 189 else CFG["name"])[0])
+_names_ce = lambda n: CE_WORD in set(re.split(r"[^a-z0-9]+", fold(n)))
+coll_names_ce = _pp.groupby("collection_id")["experience_name"].agg(lambda s: s.map(_names_ce).mean())
+other_place = lambda t, i: t == "collection" and coll_names_ce.get(str(i), 1) < 0.5
+CMP_RE = re.compile(r"\b(vs|versus|compare|comparison|compared|oder)\b", re.I)
+is_cmp_cluster = lambda c: bool(CMP_RE.search(str(names.at[c, "name"])))
+names_ce = lambda c: CE_WORD in set(re.split(r"[^a-z0-9]+", fold(names.at[c, "name"])))
+is_combo = lambda c: bool(re.search(r"\+|\bcombo", str(names.at[c, "name"]), re.I))
+# A collection about another place belongs only to a cluster about that place alone, to a comparison of the two, or to an
+# explicit combo ("Combo: Vatican Museums + St Peter's Basilica"); not to "Milford and Doubtful Sound Cruise", whose name
+# also holds the CE.
+mixes_ce = lambda c: names_ce(c) and not is_cmp_cluster(c) and not is_combo(c)
+hent = hent[[not (other_place(t, i) and mixes_ce(c))
+             for t, i, c in zip(hent["entity_type"], hent["entity_id"], hent["cid"])]]
 print(f"entities: {len(ents)} under the CE ({int(ents['operator'].sum()) if len(ents) else 0} operators); "
       f"{hent['cid'].nunique()} clusters linked by name or keywords")
 
@@ -251,15 +281,6 @@ if len(ents):
 ent_by_key = {(e.entity_type, str(e.entity_id)): e for e in ents.itertuples()} if len(ents) else {}
 cvol = kw.groupby("cid")["vol"].max()
 cid_name = lambda c: names.at[c, "name"] if c in names.index else None
-# Which products each collection's ranking lists; a collection whose products mostly do not name the CE is about another
-# place (Doubtful Sound Cruises under Milford Sound).
-_pp = pd.read_csv(OUT / f"page_products_{CE}.csv", dtype={"collection_id": str}, usecols=["collection_id", "experience_name"])
-# The CE's first name word ("milford", "vatican"): "sound" alone would count Doubtful Sound's products as Milford's.
-CE_WORD = fold(re.split(r"[^A-Za-z0-9]+", "Vatican" if CE == 189 else CFG["name"])[0])
-_names_ce = lambda n: CE_WORD in set(re.split(r"[^a-z0-9]+", fold(n)))
-coll_names_ce = _pp.groupby("collection_id")["experience_name"].agg(lambda s: s.map(_names_ce).mean())
-
-
 def page_tags(row):
     """The page's Payload place tags that are not the CE itself: its POI, then its collection."""
     out = []
@@ -293,8 +314,16 @@ def page_words(row):
 
 
 # Entities with a cluster of their own (named or linked): a page about any other place has no cluster to go to.
+# An entity counts as covered when it, or an entity of the same name, has a cluster (the inactive Underwater Observatory
+# collection 5597 is covered by POI 1294's cluster). Inactive collections never mark a page as being about another place.
 covered = {(x.entity_type, str(x.entity_id)) for x in hent.itertuples()}
-place_ents = [e for e in ents.itertuples() if e.words and not e.operator] if len(ents) else []
+_covered_words = [frozenset(ent_by_key[k].words) for k in covered if k in ent_by_key and ent_by_key[k].words]
+covered |= {(e.entity_type, str(e.entity_id)) for e in ents.itertuples() if e.words and frozenset(e.words) in _covered_words} if len(ents) else set()
+place_ents = [e for e in ents.itertuples() if e.words and not e.operator and e.is_active] if len(ents) else []
+# Comparison clusters ("Milford Sound vs Doubtful Sound") take only comparison pages, and a comparison page goes only to
+# a comparison cluster.
+is_cmp_page = lambda row: bool(CMP_RE.search(str(row["path"]).replace("-", " ").replace("/", " ") + " "
+                                             + str(row.get("focus_keyword_en") or "").split(",")[0]))
 
 
 def bigrams(text):
@@ -307,9 +336,15 @@ def phrase_hits(cid, row):
     return len(bigrams(names.at[cid, "name"]) & page)
 
 
-def fits(cid, pw):
+def fits(cid, pw, cmp=None):
     """A cluster fits a page when the page names every place the cluster's name names, and shares a distinctive word
-    with the cluster's name (or the page has none beyond the CE's own name and product formats)."""
+    with the cluster's name (or the page has none beyond the CE's own name and product formats). A comparison cluster
+    fits only a comparison page, and the other way round."""
+    if cmp is not None and is_cmp_cluster(cid) != cmp:
+        return False
+    # A page about another place (it names one) never goes to a cluster that mixes it with the CE.
+    if mixes_ce(cid) and any(other_place(e.entity_type, e.entity_id) and any(ws <= pw for ws in e.wsets) for e in place_ents):
+        return False
     if any(not any(ws <= pw for ws in e.wsets) for e in named_by(cid).itertuples()):
         return False
     dist = pw - FORMAT
@@ -324,16 +359,24 @@ def place(row):
     tags = page_tags(row)
     label = tag_label(tags[0]) if tags else None
     pw = page_words(row)
+    cmp = is_cmp_page(row)
     # 1. Operator listings go to the operator cluster.
     for t in tags:
         e = ent_by_key.get(t)
         if e is not None and e.operator:
-            return (operator_cid, "operator", tag_label(t), None) if operator_cid else (None, "operator", tag_label(t), "operator page; no operator cluster")
+            oc = operator_cluster(e)
+            return (oc, "operator", tag_label(t), None) if oc is not None else (None, "operator", tag_label(t), "operator page; no operator cluster")
     # 2. Tagged with a place: a cluster linked to it or named for it, the one sharing most words with the page path.
     if tags:
         named = {c for c in real_cids for t in tags for ws in tag_wsets(t) if ws <= cname_t[c]}
         linked = set(hent.loc[[(x.entity_type, str(x.entity_id)) in tags for x in hent.itertuples()], "cid"]) if len(hent) else set()
-        cands = (named | linked) & set(real_cids)
+        cands = {c for c in (named | linked) & set(real_cids) if is_cmp_cluster(c) == cmp}
+        coll = next((t[1] for t in tags if t[0] == "collection"), None)
+        away = bool(coll) and other_place("collection", coll)
+        if away:
+            # A collection about another place (Doubtful Sound under Milford) goes only to a cluster about that place
+            # alone: not one whose name also holds the CE ("Milford and Doubtful Sound Cruise").
+            cands = {c for c in cands if not mixes_ce(c)}
         if cands:
             # Most words shared with the page; then the cluster that is the place itself (its name, formats aside, is
             # one of the place's names: "St Peter's Basilica" over "Combo: ... + St Peter's Basilica"); then the text
@@ -344,8 +387,7 @@ def place(row):
                                              -len(cname_t[c] - FORMAT - want), cvol.get(c, 0)))
             return best, tags[0][0], label, None
         if any(own_words(t) for t in tags):
-            coll = next((t[1] for t in tags if t[0] == "collection"), None)
-            if coll and coll_names_ce.get(coll, 1) < 0.5:
+            if away:
                 return None, "tag", label, f"about another place ({tag_names.get(('collection', coll), coll)}); no cluster for it"
             # The text pick stands only when its own keywords mention the tagged place by its own name (a translated
             # name like "Vatikan" would tie the Grottoes to any German ticket search).
@@ -358,19 +400,37 @@ def place(row):
         if (e.entity_type, str(e.entity_id)) not in covered and any(ws <= pw for ws in e.wsets) \
                 and not any(ws <= cname_t[c] for c in real_cids for ws in e.wsets):
             return None, "place", label, f"about {e.name}; no cluster for it"
-    # 4. Name check on the text mapper's pick; else the cluster whose name shares most of the page's words.
-    if pd.isna(cid):
-        return cid, how, label, None
+    # 3b. A page that names a place with a cluster of its own goes there when the text pick is missing or does not fit:
+    # /underwater-observatory names POI 1294, which "Milford Sound Underwater" holds.
+    if pd.isna(cid) or (cid in cname_t and not fits(cid, pw, cmp)):
+        hits = {}
+        for e in place_ents:
+            if any(ws <= pw for ws in e.wsets):
+                for c in hent.loc[(hent["entity_type"] == e.entity_type) & (hent["entity_id"].astype(str) == str(e.entity_id)), "cid"]:
+                    if c in cname_t and c not in HEAD_CIDS and is_cmp_cluster(c) == cmp \
+                            and not (other_place(e.entity_type, e.entity_id) and mixes_ce(c)):
+                        hits[c] = max(hits.get(c, 0), len(pw & cname_t[c]))
+        if hits:
+            return max(hits, key=lambda c: (hits[c], cvol.get(c, 0))), "entity", label, None
+    # 4. Name check on the text mapper's pick; else the cluster whose name shares most of the page's words. A page the
+    # text mapper left out gets the same name search (/kayaking -> "Milford Sound Kayak Tour").
     dist = pw - FORMAT
+    if pd.isna(cid):
+        scored = [(len(dist & cname_t[c]), c) for c in real_cids if c not in HEAD_CIDS and fits(c, pw, cmp)] if dist else []
+        scored = [(sc, c) for sc, c in scored if sc and sc * 2 >= len(dist)]
+        if scored:
+            top = max(sc for sc, _ in scored)
+            return max((c for sc, c in scored if sc == top), key=lambda c: (phrase_hits(c, row), cvol.get(c, 0))), "name", label, None
+        return cid, how, label, None
     if not dist and pw:
         # A page that names only the CE and a format ("tours"): the cluster for that format in general, the one whose
         # name holds the format and nothing more specific, over "Queenstown to ... Tours" the text matched.
         plain = [c for c in real_cids if c not in HEAD_CIDS and pw & cname_t[c] and not (cname_t[c] - FORMAT)]
         if plain and cid not in plain:
             return max(plain, key=lambda c: cvol.get(c, 0)), "name", label, None
-    if cid not in cname_t or fits(cid, pw):
+    if cid not in cname_t or fits(cid, pw, cmp):
         return cid, how, label, None
-    scored = [(len(dist & cname_t[c]), c) for c in real_cids if c not in HEAD_CIDS and fits(c, pw)]
+    scored = [(len(dist & cname_t[c]), c) for c in real_cids if c not in HEAD_CIDS and fits(c, pw, cmp)]
     scored = [(s, c) for s, c in scored if s and s * 2 >= len(dist)]
     if scored:
         top = max(s for s, _ in scored)
@@ -479,6 +539,16 @@ live_by_v = bids.assign(v=bids["k"].map(vkey)).groupby("v")["k"].agg(lambda s: s
 v_ags = bids.assign(v=bids["k"].map(vkey)).groupby("v")["ad_group_id"].agg(set)
 ag_bids_v = bids.assign(v=bids["k"].map(vkey)).groupby("ad_group_id")["v"].agg(set)
 held_keys, held_v = set(held["k"]), set(held["k"].map(vkey))
+# Google's own evidence of close variants: a cluster keyword seen as a search in the last 30 days, served by a live
+# keyword under a close-variant match type (misspellings and same-meaning words, which vkey() cannot see).
+STR_FILE = OUT / f"search_terms_recent_{CE}.csv"
+served_as = {}
+if STR_FILE.exists():
+    srv = pd.read_csv(STR_FILE)
+    srv = srv[srv["match_type"].isin(["NEAR_EXACT", "NEAR_PHRASE"]) & srv["served_by"].notna()]
+    srv = srv.assign(term=srv["term"].map(norm), served_by=srv["served_by"].map(norm))
+    srv = srv[srv["served_by"].isin(kw_ags.index) & (srv["term"] != srv["served_by"])].sort_values("impr", ascending=False)
+    served_as = srv.drop_duplicates("term").set_index("term")["served_by"].to_dict()
 
 
 def bid_state(k):
@@ -488,6 +558,8 @@ def bid_state(k):
     live_as = live_by_v.get(vkey(k))
     if live_as:
         return "variant", live_as[0]
+    if k in served_as:
+        return "variant", served_as[k]
     if k in held_keys or vkey(k) in held_v:
         return "paused", None
     return "none", None
