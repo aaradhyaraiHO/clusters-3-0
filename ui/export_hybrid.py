@@ -448,11 +448,53 @@ ads = pd.read_csv(SNAP / "ad_groups.csv").assign(ag=lambda d: d["ad_group_id"].a
 # Own ad group, Parag's method: find the live ad groups that bid on the cluster's focus keyword (or a close variant that
 # shares its Keyword Planner volume), take the one with the most clicks as the core, then check how much of the
 # cluster's keyword volume that ad group also bids on.
-live_ags = set(ads.index[(ads["ad_group_status"] == "ENABLED") & (ads["campaign_status"] == "ENABLED")])
-bids = pd.read_csv(OUT / f"quality_score_{CE}.csv", dtype={"ad_group_id": str})
-bids = bids[bids["ad_group_id"].isin(live_ags)].assign(k=lambda d: d["keyword"].map(norm))
+# Google matches a keyword to its close variants (the same words in another order, singular or plural, small
+# function words), and Keyword Planner reports them as one keyword "in account". vkey() is that comparison.
+VK_STOP = {"a", "an", "the", "to", "in", "of", "for", "from", "at", "on", "and", "with", "by"}
+singular = lambda w: w[:-3] + "y" if len(w) > 4 and w.endswith("ies") else w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w
+vkey = lambda s: " ".join(sorted({singular(w) for w in re.findall(r"[a-z0-9]+", str(s).lower()) if w not in VK_STOP}))
+KS_FILE = OUT / f"keyword_status_{CE}.csv"
+if KS_FILE.exists():
+    # The latest daily snapshot of every keyword in the CE's campaigns: live only when keyword, ad group and campaign
+    # are all enabled; paused when it exists but one of them is paused (removed ones are not in the account).
+    kstat = pd.read_csv(KS_FILE, dtype={"ad_group_id": str}).assign(k=lambda d: d["keyword"].map(norm))
+    on = lambda s: s.eq("ENABLED")
+    is_live = on(kstat["keyword_status"]) & on(kstat["ad_group_status"]) & on(kstat["campaign_status"])
+    bids = kstat[is_live]
+    held = kstat[~is_live & kstat["ad_group_status"].ne("REMOVED") & kstat["campaign_status"].ne("REMOVED")]
+    KW_SNAPSHOT = str(kstat["snapshot_date"].iloc[0]) if len(kstat) else None
+    live_ags = set(bids["ad_group_id"])
+    ag_meta = pd.concat([kstat.drop_duplicates("ad_group_id").set_index("ad_group_id")[["ad_group_name", "campaign_name"]],
+                         ads[["ad_group_name", "campaign_name"]]])
+    ag_meta = ag_meta[~ag_meta.index.duplicated()]
+else:
+    live_ags = set(ads.index[(ads["ad_group_status"] == "ENABLED") & (ads["campaign_status"] == "ENABLED")])
+    bids = pd.read_csv(OUT / f"quality_score_{CE}.csv", dtype={"ad_group_id": str})
+    bids = bids[bids["ad_group_id"].isin(live_ags)].assign(k=lambda d: d["keyword"].map(norm))
+    held, KW_SNAPSHOT = bids.iloc[0:0], None
+    ag_meta = ads[["ad_group_name", "campaign_name"]]
 ag_bids = bids.groupby("ad_group_id")["k"].agg(set)
 kw_ags = bids.groupby("k")["ad_group_id"].agg(set)
+live_by_v = bids.assign(v=bids["k"].map(vkey)).groupby("v")["k"].agg(lambda s: sorted(set(s)))
+v_ags = bids.assign(v=bids["k"].map(vkey)).groupby("v")["ad_group_id"].agg(set)
+ag_bids_v = bids.assign(v=bids["k"].map(vkey)).groupby("ad_group_id")["v"].agg(set)
+held_keys, held_v = set(held["k"]), set(held["k"].map(vkey))
+
+
+def bid_state(k):
+    """bid (this exact keyword is live), variant (a close variant is live), paused (in the account, not live), none."""
+    if k in kw_ags.index:
+        return "bid", None
+    live_as = live_by_v.get(vkey(k))
+    if live_as:
+        return "variant", live_as[0]
+    if k in held_keys or vkey(k) in held_v:
+        return "paused", None
+    return "none", None
+
+
+# A keyword family: Planner's same-volume family from 1,000 searches, otherwise the keyword with its close variants.
+fam_of = lambda v, k: f"v{v:.0f}" if pd.notna(v) and v >= 1000 else f"w{vkey(k)}"
 ag_clicks = totals.groupby("ag")["clicks"].sum()
 
 
@@ -461,21 +503,21 @@ def own_ad_group(cluster_kw, focus):
     (only the focus keyword), or missing (no live ad group bids on the focus keyword)."""
     if focus is None or not len(cluster_kw):
         return {"state": "missing"}
-    fam = cluster_kw.assign(f=[f"v{v:.0f}" if v >= 1000 else f"k{key}" for v, key in zip(cluster_kw["vol"].fillna(0), cluster_kw["k"])])
+    fam = cluster_kw.assign(f=[fam_of(v, key) for v, key in zip(cluster_kw["vol"].fillna(0), cluster_kw["k"])])
     focus_fam = fam.loc[fam["k"] == norm(focus), "f"]
     focus_keys = set(fam.loc[fam["f"].isin(focus_fam), "k"]) | {norm(focus)}
-    holders = set().union(*[kw_ags.get(key, set()) for key in focus_keys])
+    holders = set().union(*[kw_ags.get(key, set()) | v_ags.get(vkey(key), set()) for key in focus_keys])
     families = fam.groupby("f").agg(vol=("vol", "first"), keys=("k", lambda ks: set(ks)))
     families["vol"] = families["vol"].fillna(0).clip(lower=1)
     if not holders:
-        bid = families["keys"].map(lambda ks: any(key in kw_ags.index for key in ks))
+        bid = families["keys"].map(lambda ks: any(bid_state(key)[0] in ("bid", "variant") for key in ks))
         return {"state": "missing", "focus": focus, "held": int(bid.sum()), "of": int(len(families))}
     core = max(holders, key=lambda a: (ag_clicks.get(a, 0), len(ag_bids.get(a, ()))))
-    in_core = ag_bids.get(core, set())
-    held = families["keys"].map(lambda ks: bool(ks & in_core))
+    in_core = ag_bids_v.get(core, set())
+    held = families["keys"].map(lambda ks: any(vkey(key) in in_core for key in ks))
     share = families.loc[held, "vol"].sum() / families["vol"].sum()
     return {"state": "full" if share >= 0.5 else "focus", "focus": focus, "share": r(share, 3),
-            "ag": ads.at[core, "ad_group_name"], "campaign": ads.at[core, "campaign_name"], "clicks": r(ag_clicks.get(core, 0)),
+            "ag": ag_meta.at[core, "ad_group_name"], "campaign": ag_meta.at[core, "campaign_name"], "clicks": r(ag_clicks.get(core, 0)),
             "held": int(held.sum()), "of": int(len(families)), "groups": len(holders)}
 
 pairs = pairs.join(ads[["ad_group_name", "campaign_name"]], on="ag")
@@ -574,8 +616,6 @@ clusters, drawer = [], {}
 
 for cid, meta in names.iterrows():
     name, k = meta["name"], kw[kw["cid"] == cid]
-    if name.startswith("Other ("):
-        continue
     in_eos = (old.get(cid) or old_by_name.get(name.lower())) is not None
     src = sources(cid)
     p = pairs[pairs["cid"] == cid]
@@ -683,8 +723,8 @@ for cid, meta in names.iterrows():
         # match types it served with. fam groups close variants the way own_ad_group does.
         "keywords": [{"kw": x.kw, "vol": r(x.vol), "clicks": r(s.at[x.k, "clicks"]) if x.k in s.index else None,
                       "oclicks": r(s.at[x.k, "oclicks"]) if x.k in s.index else None, "pos": r(s.at[x.k, "pos"], 1) if x.k in s.index else None,
-                      "targeted": match_types.get(x.k), "live": x.k in kw_ags.index,
-                      "fam": f"v{x.vol:.0f}" if pd.notna(x.vol) and x.vol >= 1000 else f"k{x.k}"} for x in top_kw.itertuples()],
+                      "targeted": match_types.get(x.k), "live": bid_state(x.k)[0] in ("bid", "variant"),
+                      "bid": bid_state(x.k)[0], "as": bid_state(x.k)[1], "fam": fam_of(x.vol, x.k)} for x in top_kw.itertuples()],
         "searches": [{"term": x.term, "kw": bool(x.is_kw), "clicks": r(x.clicks), "spend": r(x.spend, 2), "cm1": r(x.cm1, 2),
                       "ai": r((x.ai or 0) * (x.clicks or 0)), "groups": r(x.groups), "oclicks": r(x.oclicks), "impr": r(x.oimpr), "pos": r(x.pos, 1),
                       "page": None if pd.isna(x.page) else str(x.page).replace("https://", ""),
@@ -813,7 +853,7 @@ for cl in clusters:
     adg = cl["adg"]
     if not adg.get("ag"):
         continue
-    core = next((a for a in live_ags if ads.at[a, "ad_group_name"] == adg["ag"] and ads.at[a, "campaign_name"] == adg["campaign"]), None)
+    core = next((a for a in live_ags if a in ag_meta.index and ag_meta.at[a, "ad_group_name"] == adg["ag"] and ag_meta.at[a, "campaign_name"] == adg["campaign"]), None)
     rows = core_lp[core_lp["ag"] == core].sort_values("clicks", ascending=False)
     if len(rows) and rows["clicks"].sum():
         adg["landing"] = {"host": rows["host"].iloc[0], "path": rows["path"].iloc[0], "share": r(rows["clicks"].iloc[0] / rows["clicks"].sum(), 3)}
@@ -1084,11 +1124,22 @@ unc = pd.read_csv(WB / "uncaptured.csv").sort_values("Paid impressions / month",
 total_paid_clicks = pairs["clicks"].sum()
 mapped_paid_clicks = pairs.loc[pairs["cid"].notna(), "clicks"].sum()
 ce = dict(v3["ce"])
+# The CE's paid totals as Google Ads reports them by campaign (search network), which includes clicks Google ties to
+# no keyword; the clusters split the keyword-level totals, so the gap between the two is shown, not hidden.
+CT_FILE = OUT / f"campaign_totals_{CE}.csv"
+if CT_FILE.exists():
+    ct = pd.read_csv(CT_FILE)
+    ct = ct[ct["network"] == "SEARCH"]
+    paid_ce = {"clicks": r(ct["clicks"].sum()), "spend": r(ct["spend"].sum(), 2), "conv_value": r(ct["conv_value"].sum(), 2), "from": "campaigns"}
+else:
+    paid_ce = {"clicks": r(totals["clicks"].sum()), "spend": r(totals["spend"].sum(), 2), "conv_value": r(totals["conv_value"].sum(), 2), "from": "keywords"}
 ce.update({"search_terms_shown": r(st_shown, 3), "weeks": [str(w) for w in weeks], "weekly_mapped": r(wk_mapped, 3), "paid_clicks_mapped": r(mapped_paid_clicks / total_paid_clicks, 3), "organic_clicks_mapped": r(org_cid["clicks"].sum() / org["clicks"].sum(), 3),
            "home": HOME_PATH,
            # The CE's own Google Ads totals and live keywords, account-wide: the header reads these, not a sum over clusters
            # (clusters share searches), and a search that is already a live keyword anywhere is never suggested as one to add.
-           "paid": {"clicks": r(totals["clicks"].sum()), "spend": r(totals["spend"].sum(), 2), "conv_value": r(totals["conv_value"].sum(), 2)},
+           "paid": paid_ce,
+           "paid_keyword": {"clicks": r(totals["clicks"].sum()), "spend": r(totals["spend"].sum(), 2), "conv_value": r(totals["conv_value"].sum(), 2)},
+           "kw_snapshot": KW_SNAPSHOT,
            "live_keywords": sorted(kw_ags.index), "home_funnel": page_funnel(HOME_PATH), "paid_revenue_traced": r(traced_share, 3), "clusters_from": "hybrid_eos_v5" if CE == 189 else "hybrid_11ce",
            # Every child collection and POI under the CE, so Set-up can name the entity a live page lists.
            "entities": [{"type": x.entity_type, "id": str(x.entity_id), "name": x.name, "active": bool(x.is_active),
@@ -1106,6 +1157,10 @@ data = {"ce": ce, "clusters": clusters, "page_shows": shows, "pages_no_cluster":
                     "pairs": PAIR_RUN, "organic": ORGANIC_RUN, "pages_products_entities": f"supply: {SOURCES.parent.name if SOURCES else 'none'}; pages: {PAGES.name}; entities: {ENTS_FILE.name}"}}
 OUT.mkdir(exist_ok=True)
 (OUT / DATA).write_text(json.dumps(data, separators=(",", ":")))
+# The working behind every paid number, for audit_paid.py: each keyword's totals as split over clusters, and each
+# search term (with the keyword Google says served it) and the cluster it was placed in.
+spread[["kw_key", "cid", "impr", "clicks", "spend", "conv_value", "w_clicks"]].to_csv(OUT / f"audit_spread_{CE}.csv", index=False)
+pairs[["kw_key", "ag", "term", "impr", "clicks", "spend", "conv_value", "cid", "how"]].to_csv(OUT / f"audit_terms_{CE}.csv", index=False)
 (OUT / "drawer.json").write_text(json.dumps({"clusters": drawer}, separators=(",", ":")))
 (OUT / "impression_share.json").write_text(json.dumps({"window": "30 Jul - 27 Oct", "hidden_spend": 0, "total_spend": r(spread["spend"].sum(), 2),
                                                         "clusters": {c["id"]: {"catch_all": c["catch_all"]} for c in clusters}}))

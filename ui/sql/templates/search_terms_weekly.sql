@@ -8,7 +8,7 @@ WITH campaigns AS (
     FROM `segment-data.google_adwords_prepaid.p_ads_Campaign_6251119615`
 
     WHERE _PARTITIONTIME = TIMESTAMP('2026-10-28')
-          AND REGEXP_CONTAINS(campaign_name, r'cid__CE__$')
+          AND REGEXP_CONTAINS(campaign_name, r'cid__CE__\b')
 
 ),
 

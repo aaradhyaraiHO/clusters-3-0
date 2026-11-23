@@ -1134,8 +1134,10 @@ const volCell=c=>`<span class="cell num"><span>${volNum(c)}</span><i class="vbar
 // are English keyword volume, so values pass 100% and a length scale would overstate them. Green at or above the CE's
 // bar (Perf thresholds), amber below; small clusters under the search minimum are never flagged.
 const roiLine=c=>!HASPAID||!c.clicks?'':c.clicks<100?`<span class="s" title="Under 100 paid clicks, so ROI would be noise">Too few clicks (${n(c.clicks)})</span>`:`<span class="s">ROI ${pct(c.roi)} · ${k(c.clicks)} clicks</span>`;
-const coverMeter=c=>{if(c.cover==null)return coverCell(c)+roiLine(c);const ok=c.cover>=lowBar(c)||(c.vol||0)<TH().minSearches;
-  return `<span class="cov ${ok?'ok':'low'}" title="${ok?'At or above':'Below'} the ${pct(lowBar(c))} bar for ${(TYPE[typeOf(c)]||"other").toLowerCase()} clusters${c.cover>1?'. Over 100% because paid impressions come from every language while searches are English keyword volume':''}">${coverCell(c).replace(/<[^>]+>/g,' ').trim()}</span>${roiLine(c)}`};
+// A cluster whose clicks mostly come from searches Google hides is split by keyword text, not by what people typed.
+const hiddenNote=c=>c.shown!=null&&(c.clicks||0)>=PAID_FLOOR&&1-c.shown>=.3?`<span class="s warn" title="Google does not show the search behind these clicks; they follow their keyword's split">${pct(1-c.shown)} of clicks from hidden searches</span>`:'';
+const coverMeter=c=>{if(c.cover==null)return coverCell(c)+roiLine(c)+hiddenNote(c);const ok=c.cover>=lowBar(c)||(c.vol||0)<TH().minSearches;
+  return `<span class="cov ${ok?'ok':'low'}" title="${ok?'At or above':'Below'} the ${pct(lowBar(c))} bar for ${(TYPE[typeOf(c)]||"other").toLowerCase()} clusters${c.cover>1?'. Over 100% because paid impressions come from every language while searches are English keyword volume':''}">${coverCell(c).replace(/<[^>]+>/g,' ').trim()}</span>${roiLine(c)}${hiddenNote(c)}`};
 const roiCell=c=>c.roi==null?'–':`<span style="color:${c.roi<1?'var(--bad)':c.roi>=1.4?'var(--ok)':'inherit'}">${pct(c.roi)}</span>`;
 const pathOf=p=>p.path.replace(HOST,'').replace(/^\/$/,'')||'/';
 // The CE's home: '/', a locale home, or the site's Theme page when it lives elsewhere (Park Güell's /home).
@@ -1565,6 +1567,8 @@ const sig2=t=>new Set([...sig(t)].filter(w=>!TOPIC.has(w)));
 const sameSearch=(a,b)=>{const A=sig2(a),B=sig2(b);return A.size>0&&A.size===B.size&&[...A].every(w=>B.has(w))};
 const jac=(a,b)=>{const A=sig(a),B=sig(b);if(!A.size||!B.size)return 0;let i=0;A.forEach(w=>{if(B.has(w))i++});return i/(A.size+B.size-i)};
 const famKey=w=>w.fam||'k'+w.kw;
+// Bid state from the latest keyword snapshot: Google also serves a keyword's close variants (same words, another order).
+const bidTxt=w=>w.bid==='variant'?`bid as “${w.as}”`:w.bid==='paused'?'paused':w.live?'bid on':'';
 // Keywords a cluster holds after moves; merged clusters' keywords are already on the keeper.
 const heldKw=c=>kwOf(c).filter(w=>!S.moves[c.id+'|'+w.kw]).concat(Object.entries(S.moves).filter(([,v])=>v===c.id).map(([kk])=>{const [from,kw]=kk.split('|');return kwOf(byId[from]).find(w=>w.kw===kw)}).filter(Boolean));
 const KEEP_WHY=['Different intent','Too small to matter','The next run fixes it','Other'];
@@ -1932,7 +1936,7 @@ function header(){
   const lp={go:0,wait:0,content:0,perf:0,held:0};L.forEach(c=>{if(OTHER(c))return;if(S.hold[c.id]){lp.held++;return}const st=l5Stage(c);if(st){if(st.t==='With Perf')lp.perf++;else if(st.t==='With content')lp.content++;else if(st.t!=='Set up')lp.wait++;return}if(lnchCell(c).includes('data-l5='))lp.go++});
   const tiles=[['Search volume',`${k(vol)} / mo`,`${pct(ratio(buyVol,vol))} on buying clusters`],
     D.ce.revenue?['CE revenue',usd(D.ce.revenue),`${n(D.ce.orders)} orders`]:['CE revenue','–','not loaded for this CE'],
-    HASPAID?['Paid',D.ce.paid?usd(D.ce.paid.spend):usd(spend),`ROI ${pct(D.ce.paid?ratio(D.ce.paid.conv_value,D.ce.paid.spend):ratio(cm1,spend))}${camps.size?` · ${n(camps.size)} campaigns`:''}`,D.ce.paid?`Google Ads totals for every keyword of the CE, ${WINDOW}; clusters share searches, so their spend does not add up to this.`:'']:['Paid','No ads yet','new CE'],
+    HASPAID?['Paid',D.ce.paid?usd(D.ce.paid.spend):usd(spend),`ROI ${pct(D.ce.paid?ratio(D.ce.paid.conv_value,D.ce.paid.spend):ratio(cm1,spend))}${camps.size?` · ${n(camps.size)} campaigns`:''}`,D.ce.paid?(D.ce.paid.from==='campaigns'&&D.ce.paid_keyword?`Google Ads totals for the CE's campaigns, ${WINDOW}. ${pct(1-D.ce.paid_keyword.clicks/D.ce.paid.clicks,1)} of clicks are tied to no keyword, so they sit outside the clusters.`:`Google Ads totals for every keyword of the CE, ${WINDOW}.`):'']:['Paid','No ads yet','new CE'],
     ['Launch',lp.go?`${n(lp.go)} to launch`:'Nothing to launch',[lp.wait&&`${n(lp.wait)} launched, waiting`,lp.content&&`${n(lp.content)} with content`,lp.perf&&`${n(lp.perf)} with Perf`,lp.held&&`${n(lp.held)} held`].filter(Boolean).join(' · ')||'none launched yet']];
   const exec=S.mode==='execution';
   // Views are named by who works there: growth decides, content builds. Perf works in its own tool from the send.
@@ -2444,8 +2448,8 @@ function drawer(c){
     const gclicks=g=>g.ws.reduce((a,w)=>a+(w.clicks||0),0);
     const row=g=>{const open=S.kwfam.has(c.id+g.id);return `<tr class="kwfam${S.kwSel.has(g.id)?' sel':''}"><td class="ck">${g.focus||!S.edit?'':`<input type="checkbox" data-kwpick="${esc(g.id)}" ${S.kwSel.has(g.id)?'checked':''} aria-label="Select ${esc(g.label)}">`}</td>
       <td ${g.n>1?`data-kwfam="${esc(c.id+g.id)}"`:''}>${g.n>1?`<span class="caret">${open?'▾':'▸'}</span>`:''}${esc(g.label)}${g.n>1?` <span class="s">+${g.n-1} spelling${g.n>2?'s':''}</span>`:''}${g.from?` <span class="pill acc">Moved in</span><div class="s">from ${esc(nm(byId[g.from]))}</div>`:''}</td>
-      <td class="num">${n(g.vol)}</td>${HASPAID?`<td class="num">${gclicks(g)?n(gclicks(g)):dash}</td><td>${g.live?`<span class="pill ok">${g.live===g.n?'Yes':`${n(g.live)} of ${n(g.n)}`}</span>`:dash}</td>`:''}
-      <td class="kwacts">${acts(g)}</td></tr>`+(open&&g.n>1?g.ws.map(w=>`<tr class="kwchild"><td></td><td>${esc(w.kw)}</td><td></td>${HASPAID?`<td class="num">${w.clicks?n(w.clicks):''}</td><td class="s">${w.live?'bid on':''}</td>`:''}<td></td></tr>`).join(''):'')};
+      <td class="num">${n(g.vol)}</td>${HASPAID?`<td class="num">${gclicks(g)?n(gclicks(g)):dash}</td><td>${g.live?`<span class="pill ok" title="${esc(g.ws.map(bidTxt).filter(Boolean).join('; '))}">${g.live===g.n?'Yes':`${n(g.live)} of ${n(g.n)}`}</span>`:g.ws.some(w=>w.bid==='paused')?'<span class="pill mute" title="In the account, but its keyword, ad group or campaign is paused">Paused</span>':dash}</td>`:''}
+      <td class="kwacts">${acts(g)}</td></tr>`+(open&&g.n>1?g.ws.map(w=>`<tr class="kwchild"><td></td><td>${esc(w.kw)}</td><td></td>${HASPAID?`<td class="num">${w.clicks?n(w.clicks):''}</td><td class="s">${bidTxt(w)}</td>`:''}<td></td></tr>`).join(''):'')};
     const pend=(S.kwAdd[c.id]||[]).map(kw=>`<tr><td></td><td>${esc(kw)} <span class="pill line">Pending · after re-run</span></td><td class="num dim">–</td>${HASPAID?'<td></td><td></td>':''}<td class="s">Added as a seed</td></tr>`).join('');
     const mo=movedOut(c), rm=removedN(c);
     body+=`<div class="kwhead"><p class="s" style="margin:0">${n(kwCount(c))} keywords in ${n(groups.length)} families define the cluster${edited(c)?' <span class="pill warn" title="Paid and organic numbers update at the next run">Edited</span>':''}. "Bid on" means a live keyword in an enabled ad group; Perf decides what to bid.</p>
