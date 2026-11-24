@@ -4,7 +4,7 @@ Steps (each writes into snapshots/ce_<ce>/; --from <step> resumes):
   pull     EOS keywords (BigQuery clusters_3_0_eos_keywords_clean, competitors removed), the CE's paid search terms
            (Google Ads, last 90 days to the latest partition) and organic queries (Search Console: headout.com pages
            matching page_regex, plus the CE's microbrand sites). CE metadata comes from ce_sources.csv.
-  cluster  Harsha's EOS clusters prompt (prompts/eos_harsha_2026-11-18/clusters.md) on the keywords: the Messages API
+  cluster  Harsha's EOS clusters prompt (prompts/eos/clusters.md, synced from the prompts doc by sync_prompts.py) on the keywords: the Messages API
            (claude-opus-5-5, effort medium, 64K output, JSON only) when credentials exist, else `claude -p` with the same
            settings; --runs N keeps the run whose clusters agree most with the others.
   convert  harsha_to_clusters.py: cluster list, EOS-style keyword assignment, one definition per cluster.
@@ -31,7 +31,7 @@ import runlib
 
 STEPS = ["pull", "cluster", "convert", "place", "judge", "score", "export"]
 HERE = runlib.HERE
-PROMPTS = {"original": HERE / "prompts" / "eos_harsha_2026-11-18" / "clusters.md",
+PROMPTS = {"original": HERE / "prompts" / "eos" / "clusters.md",
            "patched": HERE / "prompts" / "eos_harsha_2026-11-18" / "clusters_patched.md"}
 PROMPT = PROMPTS["original"]
 PY = sys.executable

@@ -1,4 +1,4 @@
-"""Turn EOS clusters-prompt outputs (Harsha's prompt, prompts/eos_harsha_2026-11-18/clusters.md) into the pipeline's files.
+"""Turn EOS clusters-prompt outputs (Harsha's prompt, prompts/eos/clusters.md, synced from the prompts doc by sync_prompts.py) into the pipeline's files.
 
 The prompt returns clusters only (rank, level, name, type, identifiers, primary keyword). EOS then assigns keywords with
 a regex: in rank order, a cluster claims every unclaimed keyword that contains one of its identifiers as whole words.
