@@ -103,6 +103,7 @@ _meta = kw[~_moved].drop_duplicates("cid").set_index("cid")
 MERGE = {c: g.value_counts().index[0] for c, g in _to[_moved].groupby(kw.loc[_moved, "cid"]) if c not in _meta.index}
 for col in ("name", "t", "rank", "ids"):
     if col in kw:
+        kw[col] = kw[col].astype(object)
         kw.loc[_moved, col] = _to[_moved].map(_meta[col]).values
 kw.loc[_moved, "cid"] = _to[_moved].values
 if _moved.any():
