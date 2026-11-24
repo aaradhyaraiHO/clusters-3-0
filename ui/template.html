@@ -1379,7 +1379,7 @@ function sepCell(c){
 const TH_DEFAULT={cover:{TRANSACTIONAL:.10,INFORMATIONAL:.05},minSearches:1000,conv:10,roi:1.4,lossSpend:50,newCE:false};
 const TH=()=>S.th;
 const lowBar=c=>TH().cover[typeOf(c)]??TH().cover.TRANSACTIONAL;
-const ASK={cover:'Cover this cluster',mainag:'Keywords into the main ad group',dedicated:'Own ad group',landing:'Land its ads on its page',setup:'Set up this cluster',remove:'Remove from campaigns'};
+const ASK={cover:'Cover its searches',mainag:'Cover its searches in the main ad group',dedicated:'Own ad group',landing:'Land its ads on its page',setup:'Set up this cluster',remove:'Remove from campaigns'};
 const NOTE={rpc:'Set-up complete · raise RPC',nosupply:'Low coverage · check supply first',subs:'Covered · look at its sub-clusters'};
 const NOTNOW=['No reason given','No page planned','Too small','No supply','Already handled','Disagree','Policy or brand'];
 // Only the cluster's own page counts: products on the home page it falls back to don't cover its intent.
@@ -1413,15 +1413,14 @@ function askOf(c,trace){
     return low?{type:'mainag',why:`${k(v)} searches${covTxt} · entry comes with every main ticket`}:null}
   step('Is coverage high enough?',covA,!low);
   if(low){
-    // Under 20 paid clicks the share is noise, so the cluster counts as not covered by its own keywords.
-    const ownLow=T.total<20||T.own_sh<.2;
-    step('Do its own keywords catch its searches?',T.total<20?`only ${n(T.total)} paid clicks, too few to tell`:`${pct(T.own_sh)} of its paid clicks (bar 20%)${T.ai_sh>.2?`; AI Max catches ${pct(T.ai_sh)}`:''}`,!ownLow);
-    if(ownLow){step('Is something on sale for it?',sup?'yes':'no product on sale',sup);
-      return sup?{type:'cover',why:`${k(v)} searches${covTxt} · ${T.total<20?`only ${n(T.total)} paid clicks`:`its own keywords catch ${pct(T.own_sh)} of its clicks${T.ai_sh>.2?`, AI Max ${pct(T.ai_sh)}`:''}`}`}:{note:'nosupply',why:`${k(v)} searches${covTxt} · no product on sale for it`}}
+    // Perf works from search terms and picks keywords and ad groups itself (Aditya, 19 Nov), so low coverage on a
+    // cluster with something to sell is one ask, with its searches as evidence; no keyword or structure is prescribed.
+    step('Is something on sale for it?',sup?'yes':'no product on sale',sup);
+    if(!sup)return{note:'nosupply',why:`${k(v)} searches${covTxt} · no product on sale for it`};
     const setOk=ownAgShare(c)>=.5&&!landsOff(c);
-    step('Is its set-up complete?',ownAgShare(c)<.5?`its own ad group takes ${pct(ownAgShare(c))} of its clicks (bar 50%)`:landsOff(c)?`ads land on ${landA()}`:'own ad group and page',setOk);
-    if(!setOk)return{type:'dedicated',why:`${k(v)} searches${covTxt} · own keywords ${pct(T.own_sh)}, but ${ownAgShare(c)<.5?`no ad group of its own (${pct(ownAgShare(c))} of clicks)`:`lands on ${esc(c.adg.landing.path)}`}`};
-    return{note:'rpc',why:`${covTxt.slice(3)} with its own ad group and page · RPC ${money2(c.rpc)} vs CPC ${money2(c.cpc)}`};
+    step('Is its set-up complete?',ownAgShare(c)<.5?`no ad group carries most of its clicks (${pct(ownAgShare(c))})`:landsOff(c)?`ads land on ${landA()}`:'an ad group carries its clicks and they land on its page',setOk);
+    if(!setOk)return{type:'cover',why:`${k(v)} searches${covTxt}`};
+    return{note:'rpc',why:`${covTxt.slice(3)} with its set-up complete · RPC ${money2(c.rpc)} vs CPC ${money2(c.cpc)}`};
   }
   step('Do its ads land on its page?',offPage?`${n(c.clicks)} paid clicks land on ${landA()}`:'yes, or too few clicks to tell',!offPage);
   if(offPage)return{type:'landing',why:`${n(c.clicks)} paid clicks land on ${esc(c.adg.landing.path)}, not ${esc(pathOf(mainPage(c)))}`};
@@ -1444,12 +1443,14 @@ const blockedCell=c=>{const a=askState(c),d=ASKS_()[c.id],t=a&&a.v!=='agree'?a.v
   return `<span class="cell ask blocked"><span class="askt">${askTitle(c,t)}</span><span class="s warn">⚠ Needs a page, but own page is No</span><span class="s"><button class="lnk" data-sepset="${c.id}:yes">Set own page to Yes</button> or <button class="lnk" data-askaside="${c.id}">Set aside the ask</button></span></span>`};
 /* The ask as an instruction Perf can act on: what to do, to what, and the one number that says why. */
 function askTitle(c,t){const mp=mainPage(c),pg=mp&&!mp.home?pathOf(mp):null;
-  return{cover:`Bid on “${esc(focusLabel(c)||nm(c))}”`,dedicated:c.pages.length?'Give it its own ad group':'Own ad group once its page is live',mainag:`Add “${esc(focusLabel(c)||nm(c))}” to the main ticket ad group`,landing:`Land its ads on ${pg?esc(pg):'its page'}`,
+  return{cover:'Cover its searches',dedicated:c.pages.length?'Give it its own ad group':'Own ad group once its page is live',mainag:'Cover its searches in the main ticket ad group',landing:`Land its ads on ${pg?esc(pg):'its page'}`,
     setup:`Set up ads for “${esc(focusLabel(c)||nm(c))}”`,remove:'Take it out of campaigns'}[t]||ASK[t]}
+// The cluster's biggest searches by monthly volume: the evidence Perf reads, not keywords to add.
+const topSearches=c=>{const W=(DR.clusters[c.id]?.keywords||[]).filter(w=>w.vol).sort((a,b)=>b.vol-a.vol).slice(0,3);return W.length?` (top searches: ${W.map(w=>`“${esc(w.kw)}” ${k(w.vol)}`).join(', ')})`:''};
 function askWhy(c,t){const T=trigOf(c),cov=c.cover;
-  if(t==='cover')return `${k(c.vol)} searches a month; our ads show for ${cov==null?'–':cov<.001?'under 0.1%':pct(Math.min(cov,1),cov<.01?1:0)} of them${T.total<20?'':`, its own keywords catch ${pct(T.own_sh)} of its clicks`}`;
+  if(t==='cover')return `${k(c.vol)} searches a month; our ads show for ${cov==null?'–':cov<.001?'under 0.1%':pct(Math.min(cov,1),cov<.01?1:0)} of them${topSearches(c)}. Perf picks the keywords and the ad group`;
   if(t==='dedicated')return `${k(c.vol)} searches, ${cov==null?'–':pct(Math.min(cov,1))} covered; its clicks come through ad groups built for other clusters${c.pages.length?'':'. The page goes to content first'}`;
-  if(t==='mainag')return `${k(c.vol)} searches, ${cov==null?'–':cov<.001?'under 0.1%':pct(Math.min(cov,1),cov<.01?1:0)} covered; ${esc(pageTypeOf(c).replace('Sub-Attraction','sub-attraction'))}: every main ticket includes it, so ads land on ${mainPage(c)&&!mainPage(c).home?esc(pathOf(mainPage(c))):'the main ticket page'}`;
+  if(t==='mainag')return `${k(c.vol)} searches${topSearches(c)}, ${cov==null?'–':cov<.001?'under 0.1%':pct(Math.min(cov,1),cov<.01?1:0)} covered; ${esc(pageTypeOf(c).replace('Sub-Attraction','sub-attraction'))}: every main ticket includes it, so ads land on ${mainPage(c)&&!mainPage(c).home?esc(pathOf(mainPage(c))):'the main ticket page'}`;
   if(t==='landing')return `${n(c.clicks)} paid clicks go to ${isHome(c.adg?.landing?.path)?'the home page':esc(c.adg?.landing?.path||'')} instead`;
   if(t==='setup')return `${k(c.vol)} searches a month, a product on sale, no ads on this CE yet`;
   return ''}
@@ -1702,7 +1703,7 @@ const OPP_SHOW=10;
    relevant. */
 const askType=o=>ASKS_()[o.cid]?.type||askState(byId[o.cid])?.v;
 const BUCKETS=[['land','Land its ads on its page','The cluster has its own page; its core ad group lands elsewhere, 100+ paid clicks.',o=>o.type==='landing'||(o.type==='ask'&&askType(o)==='landing')],
-  ['own','Own ad group or cover this cluster','Drafted by the opportunity tree on pages that sell, plus informational pages with a product and low coverage (Perf decides).',o=>(o.type==='ask'&&askType(o)!=='landing')||o.type==='perfcall'],
+  ['own','Cover its searches','Low coverage on a cluster with something to sell, from its search terms; Perf decides keywords and ad groups. Includes informational pages with a product.',o=>(o.type==='ask'&&askType(o)!=='landing')||o.type==='perfcall'],
   ['add','Add searches as keywords','Enough clicks for about 10 conversions at the CE\'s rate, ROI at or above target, not a live keyword anywhere in the account; includes searches AI Max found.',o=>o.type==='add'||o.type==='aimax']];
 const bucketOf=o=>BUCKETS.find(b=>b[3](o));
 const HIT_TARGET=.8;
