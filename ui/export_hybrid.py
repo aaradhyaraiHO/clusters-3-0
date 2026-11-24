@@ -124,6 +124,7 @@ SYN = {**dict.fromkeys(["heli", "helicopter", "chopper"], "helicopter"),
        **dict.fromkeys(["gett", "get", "address", "direction", "location", "transport", "drive"], "getting"),
        **dict.fromkeys(["timing", "hour", "opening"], "hour"),
        **dict.fromkeys(["price", "cost", "fee"], "price"),
+       **dict.fromkeys(["luxury", "premium"], "luxury"),
        **dict.fromkeys(["rule", "regulation", "restriction"], "rule"),
        **dict.fromkeys(["waterfall", "fall"], "fall"),
        "judgement": "judgment", "maps": "map", "kayaking": "kayak", "visiting": "visit", "visitor": "visit"}
@@ -467,6 +468,128 @@ col = hent[(hent["entity_type"] == "collection") & hent["is_active"].astype(bool
 poi = hent[hent["entity_type"] == "poi"].groupby("cid").size()
 hsrc = pd.DataFrame({"entity_status": ["Child collection" if c in col.index else "POI only" for c in sorted(set(col.index) | set(poi.index))]},
                     index=pd.Index(sorted(set(col.index) | set(poi.index)), name="cid"))
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Supply: the CE's experiences matched to each cluster (the Supply column's "n of n matched selling").
+#   Experiences: experiences_<CE>.csv (sql/templates/experiences.sql: what the CE owns or its collections list; live =
+#   available and not hidden, as cluster_sources.py). Without that pull, the products the CE's pages list stand in, live
+#   when an active variant is on sale.
+#   A cluster takes, in order: (a) the products its own pages put there on purpose, i.e. a page's pins, or the ranking
+#   of a page whose collection is not the CE's own (an operator's or a sub-collection's listing); (b) for a cluster
+#   named after an operator (a supplier of the CE's products or an operator collection), that operator's experiences;
+#   (c) experiences whose name or variant names hold every word of one part of the cluster's name ("kayak", "glow worm",
+#   "overnight"), with the same synonyms and formats set aside as everywhere else. A name with no word beyond the CE
+#   and a format matches nothing here (the template's searched products handle it).
+# ---------------------------------------------------------------------------------------------------------------------
+SP_DROP = FORMAT | {"cheap", "online", "site", "website", "price", "value", "deal", "discount", "near", "top", "list", "new", "way"}
+sp_alts = lambda t: [toks(part, SP_DROP) for part in re.split(r"[/&,()]", str(t or ""))]
+_vav = pd.read_csv(OUT / f"variant_availability_{CE}.csv", dtype={"experience_id": str, "variant_id": str})
+_vord = pd.read_csv(OUT / f"variant_orders_{CE}.csv", dtype={"experience_id": str})
+_ppx = pd.read_csv(OUT / f"page_products_{CE}.csv", dtype={"collection_id": str, "experience_id": str})
+EXP_FILE = OUT / f"experiences_{CE}.csv"
+if EXP_FILE.exists() and EXP_FILE.stat().st_size:
+    xp = pd.read_csv(EXP_FILE, dtype={"experience_id": str, "listed_in": str})
+    xp = xp[~xp["experience_name"].str.contains(r"\[DUMMY|Test ILF", regex=True, na=False)].copy()
+    xp["live"] = xp["live"].astype(str).str.lower().eq("true")
+    SUPPLY_FROM = EXP_FILE.name
+else:
+    _sale = _vav[(_vav["variant_status"] == "Active") & _vav["is_available"].astype(str).str.lower().eq("true")]
+    _o = _vord.groupby("experience_id")[["count_orders", "sum_revenue_usd"]].sum()
+    xp = _ppx.drop_duplicates("experience_id")[["experience_id", "experience_name"]].copy()
+    xp["live"] = xp["experience_id"].isin(set(_sale["experience_id"]))
+    xp["orders"] = xp["experience_id"].map(_o["count_orders"]).fillna(0).astype(int)
+    xp["revenue_usd"] = xp["experience_id"].map(_o["sum_revenue_usd"]).fillna(0)
+    xp["vendors"] = None
+    SUPPLY_FROM = "page_products (experiences pull missing)"
+_vend = _vav.groupby("experience_id")["vendors"].agg(lambda s: ", ".join(s.dropna()))
+xp["vendors"] = [v if isinstance(v, str) and v else _vend.get(e, "") for e, v in zip(xp["experience_id"], xp["vendors"])]
+_vnames = _vav.groupby("experience_id")["variant_name"].agg(lambda s: " | ".join(s.dropna().astype(str)))
+xp["w"] = [toks(n) for n in xp["experience_name"]]
+xp["wv"] = [toks(str(n) + " " + _vnames.get(e, "")) for e, n in zip(xp["experience_id"], xp["experience_name"])]
+xp["sq"] = [squash(str(n) + " " + _vnames.get(e, "")) for e, n in zip(xp["experience_id"], xp["experience_name"])]
+xp_by_id = xp.drop_duplicates("experience_id").set_index("experience_id")
+
+# (a) Products a page puts there on purpose.
+_blocks = pd.read_csv(HERE / "hybrid" / "page_product_blocks.csv", dtype=str)
+_blocks = _blocks[_blocks["uid"].str.startswith(HOST)]
+_pins = {u: [str(i) for i in json.loads(v)] for u, v in zip(_blocks["uid"], _blocks["common_ranks"]) if isinstance(v, str) and v.startswith("[")}
+
+
+def page_listed(row):
+    key = str(row["path"] or "").strip("/")
+    out = list(_pins.get(HOST + ("." + key.replace("/", ".") if key else ""), []))
+    coll = None if pd.isna(row.get("collection_id")) else str(row["collection_id"]).split(".")[0]
+    if coll and coll not in ROOT_IDS["collection"]:
+        out += list(_ppx.loc[_ppx["collection_id"] == coll].sort_values("computed_rank")["experience_id"])
+    return out
+
+
+# (b) Operators: suppliers of the CE's products and the CE's operator collections, by the words of their name once
+# legal and trade words are set aside ("Cheeky Kiwi Travel Limited" -> cheeky kiwi).
+LEGAL = {"limited", "ltd", "pty", "inc", "llc", "travel", "group", "company", "nz", "iii", "ii"}
+_ops = {}
+for v in set(", ".join(xp["vendors"].fillna("")).split(", ")) - {""}:
+    _ops.setdefault(squash(v), {"name": v, "w": toks(v, LEGAL), "vendors": set(), "colls": set()})["vendors"].add(v)
+for e in (ents[ents["operator"]].itertuples() if len(ents) else []):
+    _ops.setdefault(squash(e.name), {"name": e.name, "w": toks(e.name, LEGAL), "vendors": set(), "colls": set()})["colls"].add(str(e.entity_id))
+
+
+def cluster_operator(cid):
+    """The operator a cluster is named after: its squashed name holds the operator's, or the operator's words are all in
+    its name. "Mitre Peak" is not "Mitre Peak Cruises"; "Mitre Peak Cruises Milford Sound" is."""
+    n, nt = squash(names.at[cid, "name"]), toks(names.at[cid, "name"])
+    hits = [o for k, o in _ops.items() if (len(k) > 4 and k in n) or (o["w"] and len(o["w"]) > 1 and o["w"] <= nt)]
+    return max(hits, key=lambda o: len(squash(o["name"])), default=None)
+
+
+def operator_experiences(o):
+    ids = set(xp.loc[[bool(o["vendors"] & set(str(v).split(", "))) for v in xp["vendors"]], "experience_id"])
+    ids |= set(_ppx.loc[_ppx["collection_id"].isin(o["colls"]), "experience_id"])
+    ow = toks(o["name"], LEGAL)
+    if ow:
+        ids |= set(xp.loc[[ow <= w for w in xp["w"]], "experience_id"])
+    return ids
+
+
+sup_rows = []
+_page_rows = hpages.dropna(subset=["cid"])
+for cid in real_cids:
+    found = {}
+    if cid not in HEAD_CIDS:
+        for _, prow in _page_rows[_page_rows["cid"] == cid].iterrows():
+            if prow.get("page_type") == "Theme":
+                continue
+            for e in page_listed(prow):
+                found.setdefault(e, "page")
+    op = cluster_operator(cid)
+    if op:
+        for e in operator_experiences(op):
+            found.setdefault(e, "operator")
+    if cid not in HEAD_CIDS:
+        alts = [a for a in sp_alts(names.at[cid, "name"]) if a]
+        alts = [a - (op["w"] if op else set()) for a in alts]
+        for a in [a for a in alts if a]:
+            # Words also count inside a run-together name ("Glowworm" holds glow and worm).
+            for e in xp.loc[[a <= w or all(len(t) > 3 and t in sq for t in a) for w, sq in zip(xp["wv"], xp["sq"])], "experience_id"]:
+                found.setdefault(e, "name")
+    for e, how_found in found.items():
+        if e in xp_by_id.index:
+            x = xp_by_id.loc[e]
+            sup_rows.append({"cid": cid, "experience_id": e, "experience_name": x["experience_name"], "live": bool(x["live"]),
+                             "revenue_usd": float(x["revenue_usd"] or 0), "orders": int(x["orders"] or 0), "how": how_found})
+new_sup = pd.DataFrame(sup_rows, columns=["cid", "experience_id", "experience_name", "live", "revenue_usd", "orders", "how"])
+# Vatican keeps the 28 Oct cluster_sources supply where it found any and takes the new match only where it found none;
+# every other CE uses the new match.
+if CE == 189 and len(hsup):
+    _old_live = hsup.groupby("cid")["live"].apply(lambda v: v.astype(str).str.lower().eq("true").sum())
+    keep_new = new_sup[~new_sup["cid"].isin(set(_old_live[_old_live > 0].index))]
+    hsup = pd.concat([hsup.assign(how="cluster_sources"), keep_new], ignore_index=True)
+else:
+    hsup = new_sup
+hsup["live"] = hsup["live"].astype(str).str.lower().eq("true")
+print(f"supply: {SUPPLY_FROM}; {hsup['cid'].nunique()} clusters matched, {hsup.loc[hsup['live'], 'cid'].nunique()} with one live "
+      f"({', '.join(f'{k} {v}' for k, v in hsup.drop_duplicates(['cid', 'experience_id'])['how'].value_counts().items())})")
 
 
 def sources(cid):
@@ -1080,8 +1203,6 @@ def page_shows(key, row):
 # finds nothing. A cluster whose name and focus keyword hold nothing beyond the CE's name and a format ("Cruise Tickets &
 # Booking", "Deals & Discounts", "Milford Sound Tours / Day Trips (General)") asks for the CE's product itself: its supply is what the CE's
 # own collection sells.
-SP_DROP = FORMAT | {"cheap", "online", "site", "website", "price", "value", "deal", "discount", "near", "top", "list", "new", "way"}
-sp_alts = lambda t: [toks(part, SP_DROP) for part in re.split(r"[/&,()]", str(t or ""))]
 catalog = pp.drop_duplicates("experience_id")[["experience_id", "experience_name"]].assign(w=lambda d: d["experience_name"].map(toks))
 _exp_orders = vord.groupby("experience_id")["count_orders"].sum()
 ce_sold = (pp[pp["collection_id"] == str(CE)].assign(o=lambda d: d["experience_id"].map(_exp_orders).fillna(0))
