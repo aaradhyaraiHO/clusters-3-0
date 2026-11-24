@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from english import english_checker, english_page
+from spelling import lev, speller
 
 HERE = Path(__file__).resolve().parent
 ROOT = Path(sys.argv[1])
@@ -75,6 +76,11 @@ def assign(run):
     elif "E_how" not in a:
         a["E_how"] = np.select([a["A"].notna(), a["B_raw"].where(a["score"] >= 0.7).notna()], ["identifier", "polyfuzz"],
                                np.where(a[COL].notna(), "embedding", "unmapped"))
+    if MERGE and COL in a:
+        merged = a[COL].isin(set(MERGE))
+        a[COL] = a[COL].replace(MERGE)
+        if NAME in a:
+            a.loc[merged, NAME] = a.loc[merged, COL].map(names["name"])
     return a.assign(k=a["term"].map(norm))
 
 
@@ -86,6 +92,21 @@ is_en = english_checker([CE_NAME, *kw["name"].dropna().unique()])
 # Always a bool Series: on an empty frame map() returns object dtype, and frame[object Series] selects columns, not rows.
 en_mask = lambda col: col.map(is_en).astype(bool)
 kw = kw[en_mask(kw["kw"])]
+# Misspellings of the CE's name (spelling.py) go to the cluster holding the right spelling, and a cluster made only of
+# them merges into it; MERGE re-points the search-term placements in assign(). They never become a focus keyword.
+fix_spelling = speller(CE_NAME, dict(zip(kw["k"], kw["vol"])))
+kw["fix"] = [fix_spelling(k, v) for k, v in zip(kw["k"], kw["vol"])]
+_home = dict(zip(kw.loc[kw["fix"].isna(), "k"], kw.loc[kw["fix"].isna(), "cid"]))
+_to = kw["fix"].map(lambda f: _home.get(norm(f)) if isinstance(f, str) else None)
+_moved = _to.notna() & (_to != kw["cid"])
+_meta = kw[~_moved].drop_duplicates("cid").set_index("cid")
+MERGE = {c: g.value_counts().index[0] for c, g in _to[_moved].groupby(kw.loc[_moved, "cid"]) if c not in _meta.index}
+for col in ("name", "t", "rank", "ids"):
+    if col in kw:
+        kw.loc[_moved, col] = _to[_moved].map(_meta[col]).values
+kw.loc[_moved, "cid"] = _to[_moved].values
+if _moved.any():
+    print(f"spelling: {int(_moved.sum())} misspelt keywords moved to the cluster with the right spelling; {len(MERGE)} clusters merged")
 names = kw.drop_duplicates("cid").set_index("cid")
 # Vatican carries CE totals and change log over from the v3_rebuilt export; Milford's come from its own pulls.
 if CE == 189:
@@ -849,6 +870,80 @@ ag_total_clicks = pairs.groupby("ag")["clicks"].sum()
 targeted_all = set(match_types.index)
 clusters, drawer = [], {}
 
+# The focus keyword shares a word with the cluster's name, the CE's own name aside: the same test as the tool's "Focus
+# keyword has no word in common with the name" flag (template.html computeFlags: words, isCe, stem), so a cluster the
+# backend can fix never reaches the tool flagged. "Milford Sound Location" takes "milford sound location", not the
+# bigger "milford sound drive".
+_name_stop = {"the", "and", "tickets"} | {v for w in re.split(r"[^a-z0-9]+", fold(CE_NAME)) for v in (w, re.sub(r"s$", "", w))}
+_ce_words = {w for w in re.split(r"[^a-z0-9]+", CE_NAME.lower()) if w}
+
+
+def sig(text):
+    ws = {w for w in re.split(r"[^a-z0-9]+", fold(re.sub(r"\(.*?\)", " ", str(text)))) if len(w) > 2 and w not in _name_stop}
+    ws = {w for w in ws if w not in _ce_words and not (len(w) >= 5 and any(len(c) >= 5 and lev(w, c) <= 2 for c in _ce_words))}
+    return {re.sub(r"s$", "", w) if len(w) > 4 else w for w in ws}
+
+
+# Words that say a search means to buy or book. "cruise", "tour" and the like name a product; a sight's name alone
+# ("bowen falls", "stirling falls") does not.
+# Bookable activities count too: at a water sports or whale watching CE, "surfing phuket" and "whale watching cronulla"
+# are the product.
+BUY_RE = re.compile(r"\b(tickets?|tours?|cruises?|book(ing|ings)?|reserv\w*|prices?|costs?|fees?|deals?|discounts?|cheap\w*|"
+                    r"trips?|excursions?|flights?|fly|helicopters?|heli|kayak\w*|raft\w*|transfers?|bus|coach\w*|shuttles?|"
+                    r"pass(es)?|entry|admission|rentals?|hire|packages?|safaris?|airboats?|boats?|jet ?boats?|rides?|"
+                    r"snorkel\w*|div(e|es|er|ers|ing)|scuba|sail\w*|combo|vouchers?|operators?|charters?|sightseeing|"
+                    r"watch(ing)?|surf\w*|wakeboard\w*|fishing|parasail\w*|jet ?ski\w*|zip ?lin\w*|atvs?|quads?|buggy|buggies|"
+                    r"bungee|skydiv\w*|paraglid\w*|riding|canoe\w*|paddle\w*|bikes?|biking|cycling|segway|ferr(y|ies)|"
+                    r"water ?taxi|glamping|lessons?|classes|course)\b")
+
+
+# The CE's operators, Headout's and the rest, from the pipeline's vendor step (research_ce.py --stage vendors: the
+# vendor_seeds and vendor_noise_filter prompts). A cluster named after one ("Whale Dreamer Sydney") is a booking search
+# even when Headout sells nothing from that operator.
+_vendor_file = ROOT / "snapshots" / f"ce_{CE if CE == 189 else CFG.get('eos_id') or CE}" / "vendor_seeds.json"
+VENDORS = [v["keyword"] for v in json.loads(_vendor_file.read_text())["vendors"]] if _vendor_file.exists() else []
+_vendor_words = [w for w in (set(re.split(r"[^a-z0-9]+", fold(v))) - {"", "the", "and", "tours", "tour", "cruises", "cruise", "co"}
+                             for v in VENDORS) if w]
+
+
+# Only a sight moves: a cluster named after a place feature ("Bowen Falls", "Heart Reef", "Phi Phi Viewpoint"). A name
+# that is neither a sight nor bookable is more often an operator Headout does not list ("Whale Dreamer Sydney", "Cougar
+# Line"), which stays Transactional; a route ("Railay Beach to Phi Phi Island") is a transfer to book.
+SIGHT_RE = re.compile(r"\b(falls?|waterfalls?|beach(es)?|bay|reef|island|islet|viewpoints?|lookouts?|creek|caves?|lake|lagoon|"
+                      r"peak|mount|mountain|gorge|canyon|cove|point|cape|river|track|trail|boardwalk|garden|gardens|park|"
+                      r"temple|church|cathedral|chapel|museum|monument|memorial|statue|bridge|tower|lighthouse|farm|village|"
+                      r"pier|wharf|harbou?r|sound|fjord|glacier|forest|rainforest|swamp|springs?|rock|cliffs?)\b")
+ROUTE_RE = re.compile(r"\b(to|from)\b")
+_ce_name_words = {w for w in re.split(r"[^a-z0-9]+", fold(CE_NAME)) if w} | {re.sub(r"s$", "", w) for w in re.split(r"[^a-z0-9]+", fold(CE_NAME)) if w}
+
+
+def names_vendor(name):
+    nw = set(re.split(r"[^a-z0-9]+", fold(name)))
+    return any(w <= nw for w in _vendor_words)
+
+
+def pick_focus(top_kw, name, head):
+    """The biggest keyword that is spelt right and shares a word with the name; else one of the CE's own words alone; else
+    the biggest spelt right."""
+    # Keyword Planner gives close variants one volume; among equals the cluster's own name leads, then the one sharing
+    # most words with it ("southern discoveries milford sound" over "southern discoveries milford"), then the shortest.
+    stem_set = lambda t: {re.sub(r"s$", "", w) if len(w) > 4 else w for w in re.split(r"[^a-z0-9]+", fold(t)) if w}
+    nwords = stem_set(name)
+    top_kw = top_kw.assign(_named=top_kw["k"] != norm(name), _hit=[-len(stem_set(t) & nwords) for t in top_kw["kw"]],
+                           _len=top_kw["k"].str.len()).sort_values(["vol", "_named", "_hit", "_len"], ascending=[False, True, True, True])
+    right = top_kw[top_kw["fix"].isna()] if "fix" in top_kw else top_kw
+    want = sig(str(name).replace("(", " ").replace(")", " "))
+    # A run-together name counts as the name: "mitrepeak cruises" is about Mitre Peak.
+    joined = lambda t: any(len(w) > 3 and w in re.sub(r"[^a-z0-9]", "", fold(t)) for w in want)
+    shares = right[[head or not want or bool(sig(t) & want) or joined(t) for t in right["kw"]]]
+    # A keyword of the CE's own words alone ("milford sound") is not flagged, but one naming the cluster's topic is better.
+    bare = right[[not sig(t) for t in right["kw"]]]
+    for pool in (shares, bare, right, top_kw):
+        if len(pool):
+            return pool["k"].iloc[0]
+    return None
+
+
 for cid, meta in names.iterrows():
     name, k = meta["name"], kw[kw["cid"] == cid]
     in_eos = (old.get(cid) or old_by_name.get(name.lower())) is not None
@@ -859,6 +954,8 @@ for cid, meta in names.iterrows():
     clicks, spend, cm1, impr, conv = sp["clicks"].sum(), sp["spend"].sum(), sp["conv_value"].sum(), sp["impr"].sum(), sp["conv"].sum()
     eligible = sp["eligible"].sum()
     top_kw = k.sort_values("vol", ascending=False)
+    focus = pick_focus(top_kw, name, name == HEAD_NAME or "Head Term" in name)
+    top_kw = pd.concat([top_kw[top_kw["k"] == focus], top_kw[top_kw["k"] != focus]])
 
     # Ad groups serving the cluster, from its searches' clicks.
     ag = p.groupby(["ag", "ad_group_name", "campaign_name"]).agg(clicks=("clicks", "sum"), spend=("spend", "sum"), cm1=("conv_value", "sum"),
@@ -1327,6 +1424,24 @@ for cl in clusters:
             row["select"] = None if f is None else r(f["select_sessions"] / f["sessions"], 3)
         dr["lp"] = sorted(rows, key=lambda d: -d["clicks"])[:10]
     dr["searched_products"] = searched_products(cl)
+    # Transactional needs a reason to sell: a keyword with buying intent ("bowen falls tickets"), or a product the CE sells
+    # for it. A sight with neither (Bowen Falls, Stirling Falls on a Milford cruise) is Informational, so nobody reads it
+    # as a page to build. A cluster named after an operator, and the head term, keep their type: an
+    # operator's name is itself a booking search. With intent but no product (Mitre Peak: "mitre peak cruise" searches,
+    # no Mitre Peak product), it stays Transactional and page_needed says no page of its own.
+    intent = any(BUY_RE.search(t) for t in kw.loc[kw["cid"] == cid, "k"])
+    supply = bool(cl["supply"]["n"]) or bool(dr["searched_products"])
+    operator = cluster_operator(cid) is not None or names_vendor(cl["name"])
+    cl["checks"] = {"intent": intent, "supply": supply, "operator": operator,
+                    "page_needed": None if cl["type"] != "TRANSACTIONAL" else bool(supply or operator or cl["head"])}
+    # The CE's own name words do not make a sight: every Milford cluster says "sound", every Niagara one "falls".
+    own = " ".join(w for w in re.split(r"[^a-z0-9]+", fold(cl["name"])) if w and w not in _ce_name_words)
+    sight = bool(SIGHT_RE.search(own)) and not ROUTE_RE.search(fold(cl["name"]))
+    cl["checks"]["sight"] = sight
+    if cl["type"] == "TRANSACTIONAL" and sight and not (intent or supply or operator or cl["head"]):
+        cl["type"] = "INFORMATIONAL"
+        cl["checks"]["page_needed"] = None
+        cl["changes"]["why_type"] = "Moved from Transactional: no keyword with buying intent and no product for it"
     for pg in cl["pages"]:
         pg["funnel"] = page_funnel(pg["path"])
     on_page, shown = page_products(cl)
