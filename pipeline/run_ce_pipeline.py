@@ -90,6 +90,10 @@ def pull(ce, src, snap):
         FROM `headout-analytics.analytics_staging.stg_search_console__keyword_page_performance`
         WHERE report_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 92 DAY) AND search_type = 'web' AND site IN ({site_list})
               AND (REGEXP_CONTAINS(page, r'{rx}') OR (site != 'https://www.headout.com/' AND REGEXP_CONTAINS(site, r'{rx}')))
+              -- English pages only: no language folder such as /it/ or /pt-br/ (ui/english.py). Paid searches are filtered by
+              -- language in the UI export, search terms first, so every campaign is pulled.
+              AND (NOT REGEXP_CONTAINS(page, r'^https?://[^/]+/[a-z]{{2}}(-[a-z]{{2,4}})?(/|$)')
+                   OR REGEXP_CONTAINS(page, r'^https?://[^/]+/en(/|$)'))
         GROUP BY 1, 2 HAVING SUM(count_clicks) > 0 OR SUM(count_impressions) >= 50""")
     org.to_csv(snap / "gsc_terms.csv", index=False)
     pd.DataFrame([{"ce": ce, "name": src["name"], "city": src["city"]}]).to_csv(snap / "ce_names.csv", index=False)

@@ -22,6 +22,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from english import english_checker, english_page
+
 HERE = Path(__file__).resolve().parent
 ROOT = Path(sys.argv[1])
 CE = int(sys.argv[2]) if len(sys.argv) > 2 else 189
@@ -75,6 +77,10 @@ def assign(run):
 
 kw = pd.read_csv(CLUSTERS)
 kw = kw[kw["ce"] == CE].assign(k=lambda d: d["kw"].map(norm))
+# English only (english.py): keywords, search terms and Perf data. Clusters left with no English keyword drop out.
+CE_NAME = "Vatican Museums" if CE == 189 else CFG["name"]
+is_en = english_checker([CE_NAME, *kw["name"].dropna().unique()])
+kw = kw[kw["kw"].map(is_en)]
 names = kw.drop_duplicates("cid").set_index("cid")
 # Vatican carries CE totals and change log over from the v3_rebuilt export; Milford's come from its own pulls.
 if CE == 189:
@@ -627,6 +633,23 @@ if "conv" not in totals:
     totals = totals.merge(vconv.loc[vconv["ce"] == str(CE), ["kw_key", "conv"]], on="kw_key", how="left")
 kw_text_cid = assign(KEYWORD_RUN).drop_duplicates("k").set_index("k")[COL]
 ads = pd.read_csv(SNAP / "ad_groups.csv").assign(ag=lambda d: d["ad_group_id"].astype(str)).drop_duplicates("ag").set_index("ag")
+# Search terms first: a keyword's totals cover every search it served in any language, so each keeps its English part,
+# in proportion to its visible searches (searches Google does not report are taken to follow the same mix). A keyword
+# with no visible search counts in full if its own text is English. Its English searches then split it over clusters.
+METRICS = ["impr", "clicks", "spend", "conv_value"]
+pairs["en"] = pairs["term"].map(is_en)
+vis = pairs.groupby("kw_key")[METRICS].sum()
+en_frac = (pairs[pairs["en"]].groupby("kw_key")[METRICS].sum().reindex(vis.index, fill_value=0) / vis.replace(0, np.nan))
+en_frac = en_frac.apply(lambda col: col.fillna(en_frac["clicks"]).fillna(en_frac["impr"]))
+kw_en = totals.set_index("kw_key")["keyword"].map(lambda t: 1.0 if is_en(t) else 0.0)
+totals_all = totals[["kw_key", "keyword", *METRICS]].copy()
+for c, m in [("impr", "impr"), ("eligible", "impr"), ("lost_rank", "impr"), ("impr_with_share", "impr"),
+             ("clicks", "clicks"), ("spend", "spend"), ("conv_value", "conv_value"), ("conv", "conv_value")]:
+    if c in totals:
+        totals[c] = totals[c].fillna(0) * totals["kw_key"].map(en_frac[m]).fillna(totals["kw_key"].map(kw_en)).fillna(1.0).values
+ag_en = pairs.assign(**{c: pairs[c] * pairs["en"] for c in ["conv_value"]}).groupby("ag")["conv_value"].sum() / pairs.groupby("ag")["conv_value"].sum().replace(0, np.nan)
+EN_SHARE_VALUE = pairs.loc[pairs["en"], "conv_value"].sum() / pairs["conv_value"].sum() if pairs["conv_value"].sum() else 1.0
+pairs = pairs[pairs["en"]].drop(columns="en")
 
 # Own ad group, Parag's method: find the live ad groups that bid on the cluster's focus keyword (or a close variant that
 # shares its Keyword Planner volume), take the one with the most clicks as the core, then check how much of the
@@ -642,6 +665,10 @@ if KS_FILE.exists():
     # are all enabled; paused when it exists but one of them is paused (removed ones are not in the account).
     kstat = pd.read_csv(KS_FILE, dtype={"ad_group_id": str}).assign(k=lambda d: d["keyword"].map(norm))
     on = lambda s: s.eq("ENABLED")
+    # Close-variant evidence counts a live keyword in any language: an English search Google served through the Dutch
+    # keyword is covered. The keywords the tool lists are English only.
+    live_any = set(kstat.loc[on(kstat["keyword_status"]) & on(kstat["ad_group_status"]) & on(kstat["campaign_status"]), "k"])
+    kstat = kstat[kstat["keyword"].map(is_en)]
     is_live = on(kstat["keyword_status"]) & on(kstat["ad_group_status"]) & on(kstat["campaign_status"])
     bids = kstat[is_live]
     held = kstat[~is_live & kstat["ad_group_status"].ne("REMOVED") & kstat["campaign_status"].ne("REMOVED")]
@@ -653,8 +680,9 @@ if KS_FILE.exists():
 else:
     live_ags = set(ads.index[(ads["ad_group_status"] == "ENABLED") & (ads["campaign_status"] == "ENABLED")])
     bids = pd.read_csv(OUT / f"quality_score_{CE}.csv", dtype={"ad_group_id": str})
-    bids = bids[bids["ad_group_id"].isin(live_ags)].assign(k=lambda d: d["keyword"].map(norm))
+    bids = bids[bids["ad_group_id"].isin(live_ags) & bids["keyword"].map(is_en)].assign(k=lambda d: d["keyword"].map(norm))
     held, KW_SNAPSHOT = bids.iloc[0:0], None
+    live_any = set(bids["k"])
     ag_meta = ads[["ad_group_name", "campaign_name"]]
 ag_bids = bids.groupby("ad_group_id")["k"].agg(set)
 kw_ags = bids.groupby("k")["ad_group_id"].agg(set)
@@ -670,7 +698,8 @@ if STR_FILE.exists():
     srv = pd.read_csv(STR_FILE)
     srv = srv[srv["match_type"].isin(["NEAR_EXACT", "NEAR_PHRASE"]) & srv["served_by"].notna()]
     srv = srv.assign(term=srv["term"].map(norm), served_by=srv["served_by"].map(norm))
-    srv = srv[srv["served_by"].isin(kw_ags.index) & (srv["term"] != srv["served_by"])].sort_values("impr", ascending=False)
+    srv = srv[srv["term"].map(is_en)]
+    srv = srv[srv["served_by"].isin(live_any) & (srv["term"] != srv["served_by"])].sort_values("impr", ascending=False)
     served_as = srv.drop_duplicates("term").set_index("term")["served_by"].to_dict()
 
 
@@ -737,7 +766,8 @@ for c, wc in [("impr", "w_impr"), ("eligible", "w_impr"), ("lost_rank", "w_impr"
 
 # AI Max is flagged per search term x ad group in the search-term report; a pair inherits that flag.
 stba = pd.read_csv(SNAP / "search_terms_by_adgroup.csv")
-stba = stba[stba["ce"] == CE].assign(k=lambda d: d["term"].map(norm), ag=lambda d: d["ad_group_id"].astype(str))
+stba = stba[(stba["ce"] == CE) & stba["term"].map(is_en)]
+stba = stba.assign(k=lambda d: d["term"].map(norm), ag=lambda d: d["ad_group_id"].astype(str))
 ai_share = (stba.assign(ai=stba["match_type"].eq("AI_MAX") * stba["clicks"]).groupby(["k", "ag"])[["ai", "clicks"]].sum())
 ai_share = (ai_share["ai"] / ai_share["clicks"]).fillna(0)
 pairs["ai"] = [ai_share.get((k, g), 0) for k, g in zip(pairs["k"], pairs["ag"])]
@@ -746,18 +776,20 @@ pairs["ai"] = [ai_share.get((k, g), 0) for k, g in zip(pairs["k"], pairs["ag"])]
 # clusters by that keyword's click weights; orders with an ad group but no keyword follow the ad group's cluster mix.
 po = pd.read_csv(V4 / "paid_orders_by_click.csv" if CE == 189 else OUT / f"paid_orders_by_click_{CE}.csv")
 po = po[po["ce"] == CE]
-# The traced share is of all paid revenue, so orders with no gclid or no matching click count against it.
-paid_total = po["revenue_usd"].sum()
+# The traced share is of the English part of paid revenue, so orders with no gclid or no matching click count against
+# it. Orders link to a keyword, not a search, so their English part is the English share of Google's conversion value
+# (per keyword or ad group below, CE-wide here).
+paid_total = po["revenue_usd"].sum() * EN_SHARE_VALUE
 po = po[po["match_status"] == "matched"].assign(ag=lambda d: d["ad_group_id"].astype(str).str.replace(r"\.0$", "", regex=True),
                                                                     k=lambda d: d["keyword_text"].map(norm))
 key_of = totals.drop_duplicates(["ag", "k"]).set_index(["ag", "k"])["kw_key"]
 po["kw_key"] = [key_of.get((g, k)) for g, k in zip(po["ag"], po["k"])]
 rev_kw = po.dropna(subset=["kw_key"]).merge(w[["kw_key", "cid", "w_clicks"]], on="kw_key")
-rev_kw["rev"] = rev_kw["revenue_usd"] * rev_kw["w_clicks"]
+rev_kw["rev"] = rev_kw["revenue_usd"] * rev_kw["w_clicks"] * rev_kw["kw_key"].map(en_frac["conv_value"]).fillna(1.0)
 ag_mix = pairs.dropna(subset=["cid"]).groupby(["ag", "cid"])["clicks"].sum()
 ag_mix = (ag_mix / ag_mix.groupby(level=0).transform("sum")).rename("share").reset_index()
 rev_ag = po[po["kw_key"].isna()].merge(ag_mix, on="ag")
-rev_ag["rev"] = rev_ag["revenue_usd"] * rev_ag["share"]
+rev_ag["rev"] = rev_ag["revenue_usd"] * rev_ag["share"] * rev_ag["ag"].map(ag_en).fillna(1.0)
 paid_rev = pd.concat([rev_kw[["cid", "rev"]], rev_ag[["cid", "rev"]]]).groupby("cid")["rev"].sum()
 traced_share = paid_rev.sum() / paid_total if paid_total else None
 
@@ -765,6 +797,7 @@ traced_share = paid_rev.sum() / paid_total if paid_total else None
 cap = pd.read_csv(WB / "capture.csv").set_index("Cluster") if CE == 189 else pd.DataFrame().rename_axis("Cluster")
 cov = pd.read_csv(WB / "cluster_adgroups.csv").set_index("Cluster") if CE == 189 else pd.DataFrame().rename_axis("Cluster")
 org = assign(ORGANIC_RUN)
+org = org[org["term"].map(is_en) & org["top_page"].map(english_page)]
 org_cid = org.dropna(subset=[COL])
 
 lp = pd.read_csv(LANDING)
@@ -1011,6 +1044,7 @@ camp_cid = stba.dropna(subset=["cid"]).groupby(["cid", "campaign_name"])[["click
 
 # Weekly search terms (13 full weeks), mapped with the same term assignments.
 wk = pd.read_csv(OUT / f"search_terms_weekly_{CE}.csv").assign(k=lambda d: d["term"].map(norm))
+wk = wk[wk["term"].map(is_en)]
 wk["cid"] = wk["k"].map(pair_cid[COL])
 weeks = sorted(wk["week"].unique())
 wk_cid = wk.dropna(subset=["cid"]).groupby(["cid", "week"])[["impr", "clicks", "spend", "conv_value"]].sum()
@@ -1026,7 +1060,7 @@ for cid, g in wk_t.groupby("cid"):
 
 # Quality Score: keywords with a score (0 = not enough traffic), weighted by the keyword's impressions in the window.
 qs = pd.read_csv(OUT / f"quality_score_{CE}.csv")
-qs = qs[qs["quality_score"] > 0].assign(kw_key=lambda d: d["ad_group_id"].astype(str) + "~" + d["criterion_id"].astype(str),
+qs = qs[(qs["quality_score"] > 0) & qs["keyword"].map(is_en)].assign(kw_key=lambda d: d["ad_group_id"].astype(str) + "~" + d["criterion_id"].astype(str),
                                         k=lambda d: d["keyword"].map(norm))
 qs = qs.merge(totals[["kw_key", "impr"]], on="kw_key", how="left").fillna({"impr": 0})
 qs["cid"] = qs["k"].map(kw_text_cid)
@@ -1314,6 +1348,9 @@ for cl in clusters:
         kw_row["qs"] = r(v, 1) if v is not None and pd.notna(v) else None
 
 unc = pd.read_csv(WB / "uncaptured.csv").sort_values("Paid impressions / month", ascending=False) if CE == 189 else pd.DataFrame()
+if len(unc):
+    unc = unc[unc["Search-term cluster"].map(is_en)].assign(
+        **{"Top searches": lambda d: d["Top searches"].fillna("").map(lambda v: " | ".join(t for t in v.split(" | ") if is_en(t)))})
 total_paid_clicks = pairs["clicks"].sum()
 mapped_paid_clicks = pairs.loc[pairs["cid"].notna(), "clicks"].sum()
 ce = dict(v3["ce"])
@@ -1323,14 +1360,18 @@ CT_FILE = OUT / f"campaign_totals_{CE}.csv"
 if CT_FILE.exists():
     ct = pd.read_csv(CT_FILE)
     ct = ct[ct["network"] == "SEARCH"]
-    paid_ce = {"clicks": r(ct["clicks"].sum()), "spend": r(ct["spend"].sum(), 2), "conv_value": r(ct["conv_value"].sum(), 2), "from": "campaigns"}
+    all_paid = {"clicks": r(ct["clicks"].sum()), "spend": r(ct["spend"].sum(), 2), "conv_value": r(ct["conv_value"].sum(), 2)}
 else:
-    paid_ce = {"clicks": r(totals["clicks"].sum()), "spend": r(totals["spend"].sum(), 2), "conv_value": r(totals["conv_value"].sum(), 2), "from": "keywords"}
+    all_paid = None
+# The header is the English searches' share of every keyword's totals, across all the CE's campaigns; the CE's whole
+# Google Ads total (every language, and clicks tied to no keyword) is kept beside it.
+paid_ce = {"clicks": r(totals["clicks"].sum()), "spend": r(totals["spend"].sum(), 2), "conv_value": r(totals["conv_value"].sum(), 2),
+           "from": "searches", "all": all_paid, "campaigns": int(pairs.loc[pairs["clicks"] > 0, "campaign_name"].nunique())}
 ce.update({"search_terms_shown": r(st_shown, 3), "weeks": [str(w) for w in weeks], "weekly_mapped": r(wk_mapped, 3), "paid_clicks_mapped": r(mapped_paid_clicks / total_paid_clicks, 3), "organic_clicks_mapped": r(org_cid["clicks"].sum() / org["clicks"].sum(), 3),
            "home": HOME_PATH,
            # The CE's own Google Ads totals and live keywords, account-wide: the header reads these, not a sum over clusters
            # (clusters share searches), and a search that is already a live keyword anywhere is never suggested as one to add.
-           "paid": paid_ce,
+           "paid": paid_ce, "scope": "English",
            "paid_keyword": {"clicks": r(totals["clicks"].sum()), "spend": r(totals["spend"].sum(), 2), "conv_value": r(totals["conv_value"].sum(), 2)},
            "kw_snapshot": KW_SNAPSHOT,
            "live_keywords": sorted(kw_ags.index), "home_funnel": page_funnel(HOME_PATH), "paid_revenue_traced": r(traced_share, 3), "clusters_from": "hybrid_eos_v5" if CE == 189 else "hybrid_11ce",
@@ -1354,6 +1395,7 @@ OUT.mkdir(exist_ok=True)
 # search term (with the keyword Google says served it) and the cluster it was placed in.
 spread[["kw_key", "cid", "impr", "clicks", "spend", "conv_value", "w_clicks"]].to_csv(OUT / f"audit_spread_{CE}.csv", index=False)
 pairs[["kw_key", "ag", "term", "impr", "clicks", "spend", "conv_value", "cid", "how"]].to_csv(OUT / f"audit_terms_{CE}.csv", index=False)
+totals_all.merge(totals[["kw_key", *METRICS]], on="kw_key", suffixes=("_all", "_en")).to_csv(OUT / f"audit_keywords_{CE}.csv", index=False)
 (OUT / "drawer.json").write_text(json.dumps({"clusters": drawer}, separators=(",", ":")))
 (OUT / "impression_share.json").write_text(json.dumps({"window": "30 Jul - 27 Oct", "hidden_spend": 0, "total_spend": r(spread["spend"].sum(), 2),
                                                         "clusters": {c["id"]: {"catch_all": c["catch_all"]} for c in clusters}}))

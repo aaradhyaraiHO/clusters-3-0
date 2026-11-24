@@ -2,8 +2,12 @@
 
   python3 audit_paid.py <out_dir> <google_campaigns.csv> <google_keywords.csv> <bq_dir> 3945 189
 
-<bq_dir> holds adgroups.csv (ad-group-level stats), terms.csv (search terms, same window) and served.csv (which keyword
-served each of the tool's keywords as a search in the last 30 days), from the queries in the sheet's SQL tab.
+<bq_dir> holds adgroups.csv (ad-group-level stats), terms.csv (search terms, same window), kwterms.csv (search terms by
+the keyword that served them, same window) and served.csv (which keyword served each of the tool's keywords as a search
+in the last 30 days), from the queries in the sheet's SQL tab.
+
+The tool is English only, search terms first (english.py): checks 1, 1b and 5 compare the raw data, every language, with
+Google; check 1c recomputes each keyword's English part from BigQuery's search terms; checks 2 and 3 run on English parts.
 
 Reads the export's working (audit_spread_<CE>.csv, audit_terms_<CE>.csv), the snapshot's keyword totals and ad groups,
 the built cluster data, and Google's campaign-level totals (google_campaigns.csv, from the SQL in the sheet's SQL tab).
@@ -14,7 +18,10 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+
+from english import english_checker
 
 HERE = Path(__file__).resolve().parent
 ROOT = Path.home() / "analytics" / ".claude" / "worktrees" / "clusters-3-0" / "scripts" / "clusters_3_0"
@@ -53,24 +60,28 @@ def main():
     ag_bq = pd.read_csv(bq / "adgroups.csv", dtype={"ce": str, "ad_group_id": str})
     terms_bq = pd.read_csv(bq / "terms.csv", dtype={"ce": str})
     served = pd.read_csv(bq / "served.csv", dtype={"ce": str})
+    kwterms = pd.read_csv(bq / "kwterms.csv", dtype={"ce": str})
     gkw = pd.read_csv(kfile, dtype={"ce": str})
     google = pd.read_csv(gfile, dtype={"ce": str})
     google = google[google["network"] == "SEARCH"]
-    tabs = {k: [] for k in ["1 CE totals", "1b Keyword totals", "10 Bid status", "2 Nothing lost", "3 Hidden searches", "4 Search-term labels", "5 Ad groups",
+    tabs = {k: [] for k in ["1 CE totals", "1b Keyword totals", "1c English share", "10 Bid status", "2 Nothing lost", "3 Hidden searches", "4 Search-term labels", "5 Ad groups",
                             "6 Clusters", "6b Cluster search terms"]}
     H = {
         "1 CE totals": ["CE", "Campaign", "Campaign id", "Google clicks (campaign level)", "Google cost", "Google conv value",
                         "Google clicks (keyword level)", "Google cost (keyword level)", "Google conv value (keyword level)",
                         "Tool clicks (in clusters)", "Tool cost (in clusters)", "Tool conv value (in clusters)", "Clusters vs Google: clicks", "Cost", "Conv value",
-                        "Checked in Google Ads UI (Y)", "UI clicks", "UI cost", "Note", "Tool header clicks", "Tool header cost", "Tool header conv value"],
+                        "Checked in Google Ads UI (Y)", "UI clicks", "UI cost", "Note", "Tool all-language total clicks (Paid tile note)", "Tool all-language total cost", "Tool all-language total conv value"],
         "1b Keyword totals": ["CE", "Keyword id (ad group~criterion)", "Keyword", "Tool impressions", "Tool clicks", "Tool cost", "Tool conv value",
                               "BigQuery impressions", "BigQuery clicks", "BigQuery cost", "BigQuery conv value",
                               "Clicks off (abs)", "Cost off (abs)", "Conv value off (abs)"],
+        "1c English share": ["CE", "Keyword id (ad group~criterion)", "Keyword", "BigQuery clicks (every language)", "BigQuery English share of its searches' clicks",
+                             "BigQuery English clicks", "Tool English clicks", "Clicks off (abs)", "BigQuery English cost", "Tool English cost", "Cost off (abs)",
+                             "BigQuery English conv value", "Tool English conv value", "Conv value off (abs)"],
         "10 Bid status": ["CE", "Cluster", "Keyword", "Searches / mo", "Tool says", "Live as", "BigQuery: exact keyword live today",
                           "BigQuery: exact keyword in account, not live", "Google served this search (last 30 days): by which keyword", "Verdict", "Why"],
-        "2 Nothing lost": ["CE", "Metric", "Keyword totals (tool input)", "Split across clusters", "Sum of the tool's clusters",
+        "2 Nothing lost": ["CE", "Metric", "Keyword totals, English part (tool input)", "Split across clusters", "Sum of the tool's clusters",
                            "In catch-all clusters the tool hides (Other)", "In no cluster", "Unaccounted (input − clusters − hidden − no cluster)", "Keywords split", "Keywords whose split ≠ 100%"],
-        "3 Hidden searches": ["CE", "Metric", "Keyword totals", "Visible search terms", "Share visible", "Visible and placed in a cluster",
+        "3 Hidden searches": ["CE", "Metric", "Keyword totals, English part", "Visible search terms", "Share visible", "Visible and placed in a cluster",
                               "Share of visible placed"],
         "4 Search-term labels": ["CE", "Search term", "Clicks", "Cost", "Conv value", "Tool's cluster", "Placed by",
                                  "Ad group serving most clicks", "Right cluster? (Y/N)", "Should be", "Reviewer", "Note"],
@@ -123,6 +134,27 @@ def main():
                                               round(float(b.spend), 2) if b is not None else 0, round(float(b.conv_value), 2) if b is not None else 0,
                                               f"=ABS(E{r}-I{r})", f"=ROUND(ABS(F{r}-J{r}),2)", f"=ROUND(ABS(G{r}-K{r}),2)"])
 
+        # 1c. English part of every keyword, recomputed from BigQuery's search terms by the same rule as the export: each
+        # keyword keeps the English share of its visible searches; one with none counts in full if its own text is English.
+        ak = pd.read_csv(HERE / cfg["out"] / f"audit_keywords_{ce}.csv").set_index("kw_key")
+        is_en = english_checker([data["ce"]["name"], *[c["name"] for c in data["clusters"]]])
+        mets = ["impr", "clicks", "spend", "conv_value"]
+        kq = kwterms[kwterms["ce"] == ce].assign(en=lambda d: d["term"].map(is_en))
+        vis_k = kq.groupby("kw_key")[mets].sum()
+        frac = kq[kq["en"]].groupby("kw_key")[mets].sum().reindex(vis_k.index, fill_value=0) / vis_k.replace(0, np.nan)
+        frac = frac.apply(lambda col: col.fillna(frac["clicks"]).fillna(frac["impr"]))
+        gkc = gkw[gkw["ce"] == ce].set_index("kw_key")
+        text_en = ak["keyword"].map(lambda t: 1.0 if is_en(t) else 0.0)
+        for key in sorted(set(gkc.index) | set(ak.index), key=lambda x: -float(gkc["clicks"].get(x, 0))):
+            share = lambda m: frac[m].get(key) if key in frac.index and pd.notna(frac[m].get(key)) else text_en.get(key, 1.0)
+            bq_v = lambda m: float(gkc[m].get(key, 0)) * share(m)
+            tool_v = lambda m: float(ak[f"{m}_en"].get(key, 0))
+            r = len(tabs["1c English share"]) + 1
+            tabs["1c English share"].append([lab, key, ak["keyword"].get(key, ""), float(gkc["clicks"].get(key, 0)), round(share("clicks"), 4),
+                                             round(bq_v("clicks"), 2), round(tool_v("clicks"), 2), f"=ROUND(ABS(F{r}-G{r}),2)",
+                                             round(bq_v("spend"), 2), round(tool_v("spend"), 2), f"=ROUND(ABS(I{r}-J{r}),2)",
+                                             round(bq_v("conv_value"), 2), round(tool_v("conv_value"), 2), f"=ROUND(ABS(L{r}-M{r}),2)"])
+
         # 10. Bid status: every keyword the tool shows, against Google's keyword snapshot and the searches it served
         drw = json.loads((HERE / cfg["out"] / "drawer.json").read_text())["clusters"]
         ks = pd.read_csv(HERE / cfg["out"] / f"keyword_status_{ce}.csv")
@@ -173,7 +205,7 @@ def main():
 
         # 2. Nothing lost: input = split + no cluster = clusters shown
         sp = spread.groupby("kw_key")[["clicks", "impr", "spend", "conv_value", "w_clicks"]].sum()
-        kt = tot.set_index("kw_key")[["clicks", "impr", "spend", "conv_value"]]
+        kt = ak[[f"{m}_en" for m in ["clicks", "impr", "spend", "conv_value"]]].rename(columns=lambda c: c[:-3])
         clusters = pd.DataFrame(data["clusters"])
         bad_split = int(((sp["w_clicks"] - 1).abs() > 0.001).sum())
         for metric, k, ck in [("Clicks", "clicks", "clicks"), ("Impressions", "impr", "impr"), ("Cost", "spend", "spend"), ("Conv value", "conv_value", "google_value")]:
