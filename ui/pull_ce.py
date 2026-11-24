@@ -49,8 +49,14 @@ def run(name, sql, out, env):
                          input=sql, capture_output=True, text=True, env=env)
     if res.returncode:
         raise SystemExit(f"{name}: bq failed\n{res.stderr[-2000:] or res.stdout[-2000:]}")
-    out.write_text(res.stdout)
-    print(f"{out.name}: {max(res.stdout.count(chr(10)) - 1, 0)} rows")
+    text = res.stdout
+    if not text.strip():
+        # bq prints nothing for 0 rows; a dry run of the same query gives the columns, so the file keeps its header.
+        dry = subprocess.run(["bq", "query", "--use_legacy_sql=false", "--dry_run", "--format=json"], input=sql,
+                             capture_output=True, text=True, env=env)
+        text = ",".join(f["name"] for f in json.loads(dry.stdout)["statistics"]["query"]["schema"]["fields"]) + "\n"
+    out.write_text(text)
+    print(f"{out.name}: {max(text.count(chr(10)) - 1, 0)} rows")
 
 
 def main():

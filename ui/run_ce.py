@@ -23,10 +23,11 @@ from pathlib import Path
 import pandas as pd
 
 HERE = Path(__file__).resolve().parent
-ROOT = Path(os.environ.get("CLUSTERS_PIPELINE_DIR", Path(__file__).resolve().parent.parent / "pipeline"))
+ROOT = Path.home() / "analytics" / ".claude" / "worktrees" / "clusters-3-0" / "scripts" / "clusters_3_0"
 VENV = ROOT / ".env-clusters" / "venv" / "bin" / "python"
 SOURCE = ROOT / "snapshots" / "20261030_validation_v1"
 STEPS = ["pull", "map", "prepare", "group", "facts", "export", "build"]
+NO_SITE = "www.no-microbrand.invalid"
 
 
 def fold(t):
@@ -66,17 +67,42 @@ def site_of(ce):
     return None
 
 
-def register(ce, host):
+def key_of(ce, reg):
+    """The id the tool keys a CE by. A real CE id is a number; a placeholder ("18 - Key West", a category in a city
+    before the CE is created) gets a stand-in number from 900001, kept in ces.json as eos_id -> key."""
+    if ce.isdigit():
+        return ce
+    for k, v in reg["ces"].items():
+        if v.get("eos_id") == ce:
+            return k
+    return str(max([900000, *[int(k) for k in reg["ces"] if int(k) >= 900000]]) + 1)
+
+
+def register(ce, host, final=False):
     reg = json.loads((HERE / "ces.json").read_text())
-    if ce in reg["ces"]:
-        return reg["ces"][ce]
-    names = pd.read_csv(SOURCE / "ce_names.csv", dtype={"ce": str}).set_index("ce")
-    if ce not in names.index:
-        raise SystemExit(f"CE {ce} has no clusters in the 11-CE hybrid run ({SOURCE.name}). The pipeline session clusters it first.")
-    name = names.at[ce, "name"]
-    host = host or site_of(ce)
+    key = key_of(ce, reg)
+    if key in reg["ces"]:
+        return key, reg["ces"][key]
+    if final:
+        # A CE outside the 30 Oct snapshot: its name and clusters come from the pipeline's own output.
+        src = pd.read_csv(ROOT / "ce_sources.csv", dtype=str).set_index("ce")
+        if ce not in src.index or not (ROOT / "snapshots" / f"ce_{ce}" / "final" / "clusters.csv").exists():
+            raise SystemExit(f"CE {ce}: add it to ce_sources.csv and run run_ce_pipeline.py on it first")
+        name = src.at[ce, "name"]
+        clusters = pd.read_csv(ROOT / "snapshots" / f"ce_{ce}" / "final" / "clusters.csv")
+        kw = pd.DataFrame({"ce": ce, "name": clusters["cluster"], "vol": clusters["volume"]})
+    else:
+        names = pd.read_csv(SOURCE / "ce_names.csv", dtype={"ce": str}).set_index("ce")
+        if ce not in names.index:
+            raise SystemExit(f"CE {ce} has no clusters in the 11-CE hybrid run ({SOURCE.name}); run it with --final")
+        name = names.at[ce, "name"]
+        kw = pd.read_csv(SOURCE / "cluster_keywords.csv", dtype={"ce": str}, usecols=["ce", "name", "vol"])
+    host = host or (site_of(ce) if ce.isdigit() else None)
     if not host:
-        raise SystemExit(f"No Payload home page lists collection {ce}; pass --host www.<site>")
+        if not final:
+            raise SystemExit(f"No Payload home page lists collection {ce}; pass --host www.<site>")
+        # No microbrand yet: page pulls match nothing, and the CE shows as one with no pages.
+        host = NO_SITE
     host = host if host.startswith("www.") else "www." + host
     # The CE's own words: its name without the product words ("Great Barrier Reef Cruises" -> great barrier reef).
     generic = {"tickets", "ticket", "tours", "tour", "cruises", "cruise", "the", "and", "of"}
@@ -84,7 +110,6 @@ def register(ce, host):
     slug = "".join(core)[:24] or f"ce{ce}"
     # Only the name's own words: a city can be a cluster of its own ("From Cairns").
     words = sorted({w for w in core if len(w) > 2})
-    kw = pd.read_csv(SOURCE / "cluster_keywords.csv", dtype={"ce": str}, usecols=["ce", "name", "vol"])
     by_vol = kw[kw["ce"] == ce].groupby("name")["vol"].max().sort_values(ascending=False)
     # Head cluster: "... Head Term" where the clustering named one, else the cluster named after the CE itself,
     # else the largest cluster whose name is only CE words.
@@ -93,12 +118,14 @@ def register(ce, host):
             or next((c for c in by_vol.index if set(re.split(r"[^a-z0-9]+", fold(c))) - {""} <= set(core)), None))
     cfg = {"slug": slug, "name": name, "host": host, "out": f"hybrid_{slug}", "data": f"{slug}.json",
            "page": f"{slug}-clusters.html", "title": f"{name} Clusters", "name_words": words}
+    if key != ce:
+        cfg["eos_id"] = ce
     if head and "head term" not in head.lower():
         cfg["head"] = head
-    reg["ces"][ce] = cfg
+    reg["ces"][key] = cfg
     (HERE / "ces.json").write_text(json.dumps(reg, indent=2, ensure_ascii=False) + "\n")
-    print(f"registered CE {ce}: {name} · {host} · head cluster {head or 'not found: set it in ces.json'}")
-    return cfg
+    print(f"registered CE {ce}{f' as {key}' if key != ce else ''}: {name} · {host} · head cluster {head or 'not found: set it in ces.json'}")
+    return key, cfg
 
 
 def main():
@@ -109,16 +136,16 @@ def main():
     p.add_argument("--final", nargs="?", const="original", choices=["original", "patched"],
                    help="build from the pipeline's final/ output instead of the 11-CE mapping run")
     a = p.parse_args()
-    cfg = register(a.ce, a.host)
+    key, cfg = register(a.ce, a.host, final=bool(a.final))
     (HERE / cfg["out"]).mkdir(exist_ok=True)
     py, venv, root = sys.executable, str(VENV), str(ROOT)
     commands = {
-        "pull": [py, "pull_ce.py", a.ce],
-        "map": [py, "final_ce.py", root, a.ce, "--prompt", a.final] if a.final else [venv, "map_ce.py", root, a.ce],
-        "prepare": [venv, "prepare_ce.py", root, a.ce],
-        "group": [venv, "group_unclustered.py", root, a.ce],
-        "facts": [py, "facts_ce.py", a.ce],
-        "export": [venv, "export_hybrid.py", root, a.ce],
+        "pull": [py, "pull_ce.py", key],
+        "map": [py, "final_ce.py", root, key, "--prompt", a.final] if a.final else [venv, "map_ce.py", root, key],
+        "prepare": [venv, "prepare_ce.py", root, key],
+        "group": [venv, "group_unclustered.py", root, key],
+        "facts": [py, "facts_ce.py", key],
+        "export": [venv, "export_hybrid.py", root, key],
         "build": [py, "build.py", cfg["slug"]],
     }
     for step in STEPS[STEPS.index(a.start):]:

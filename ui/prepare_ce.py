@@ -41,7 +41,9 @@ kw_emb = model.encode(kw_text.tolist(), normalize_embeddings=True, batch_size=64
 page_text = (pages["focus_keyword_en"].fillna("").str.split(",").str[0] + " " + pages["path"].str.replace("/", " ")).map(strip)
 page_emb = model.encode(page_text.tolist(), normalize_embeddings=True, batch_size=64)
 jac = lambda a, b: len(set(a.split()) & set(b.split())) / len(set(a.split()) | set(b.split())) if (a or b) else 0.0
-sims = 0.6 * (page_emb @ kw_emb.T) + 0.4 * np.array([[jac(p_, k_) for k_ in kw_text] for p_ in page_text])
+# A CE with no microbrand pages yet (a new CE) has nothing to match.
+sims = (0.6 * (page_emb @ kw_emb.T) + 0.4 * np.array([[jac(p_, k_) for k_ in kw_text] for p_ in page_text])
+        if len(pages) else np.zeros((0, len(kw))))
 head = kw.loc[(kw["name"] == CFG.get("head")) | kw["name"].str.contains("Head Term", case=False), "cid"].iloc[0]
 real = ~kw["name"].str.startswith("Other").to_numpy()
 pages["cid"], pages["how"] = None, None
