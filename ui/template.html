@@ -1262,13 +1262,14 @@ function prodCell(c){
 const SEP_L={yes:'Yes',no:'No'};
 /* Current status (Parag, 10 Nov): what is wrong with a cluster, first rule that applies. Buying clusters: not set up,
    supply, traffic, return. Content clusters only have a page or not. */
-const ST={nosetup:['Not set up','bad'],supply:['Supply thin','warn'],traffic:['No traffic','warn'],under:['Underperforming','warn'],ok:['Working','ok'],nopage:['No page yet','mute'],live:['Page live','ok']};
-const ST_RANK={nosetup:0,supply:1,traffic:2,under:3,nopage:4,ok:5,live:6};
+const ST={nosetup:['Not set up','bad'],supply:['Supply thin','warn'],check:['Check supply','mute'],traffic:['No traffic','warn'],under:['Underperforming','warn'],ok:['Working','ok'],nopage:['No page yet','mute'],live:['Page live','ok']};
+const ST_RANK={nosetup:0,supply:1,check:1.5,traffic:2,under:3,nopage:4,ok:5,live:6};
 function statusOf(c){
   if(OTHER(c))return null;
   if(!TR(c))return c.pages.length?{k:'live',why:esc(pathOf(mainPage(c)||c.pages[0]))}:{k:'nopage',why:"content's call"};
   const st=prodState(c);
-  if(!st.yes)return{k:'supply',why:st.v==='uniq_no'?'its product is not on sale':st.v==='none'?'no unique experience':'supply not set'};
+  // Supply thin only when the data says so; when no product could be matched either way, growth sets it.
+  if(!st.yes)return st.v?{k:'supply',why:st.v==='uniq_no'?'its product is not on sale':'no unique experience'}:{k:'check',why:'no product matched yet: set it'};
   if(sepOf(c)==='yes'&&!c.pages.length)return{k:'nosetup',why:S.sentContent?.has(c.id)?'with content, no page yet':S.L[c.id]||S.lstate[c.id]==='launched'?(LAUNCH_DIRECT.has(pageTypeOf(c))?'launched, page in draft':'launched, waiting for content'):'no page yet'};
   if(!HASPAID)return{k:'ok',why:''};
   const tgt=targetOf(DR.clusters[c.id]||{}), cov=c.cover;
