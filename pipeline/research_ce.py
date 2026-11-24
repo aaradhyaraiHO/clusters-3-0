@@ -40,6 +40,8 @@ ADS_PYTHON = Path.home() / "google-ads-mcp" / "venv" / "bin" / "python"
 PLANNER_ACCOUNT = "8738486895"
 MIN_VOLUME = 10
 MAX_KEYWORDS = 1000
+MAX_VENDOR_KEYWORDS = 300
+COMMON_WORD_VOLUME = 10000
 # Words that say what kind of product, not which one: an idea sharing only these with the seeds is not about the CE.
 GENERIC = set("""tickets ticket tours tour cruise cruises day trip trips the and of to from in at near best top cheap price prices
 cost book booking deals deal guided guide private group small half full city island islands park national things do visit
@@ -175,23 +177,38 @@ def words(text):
     return [w for w in re.split(r"[^a-z0-9]+", str(text).lower()) if w]
 
 
-def keep(ideas, seeds, name, vendors=()):
+def keep(ideas, seeds, name, vendors=(), vendor_ideas=None):
     """Ideas about the CE: they share a distinctive word with the CE's name or a seed, or name a vendor in full. A vendor's
     words are not anchors on their own: "see sight tours" would otherwise admit every idea with "see" in it."""
     anchors = {w for s in [name, *seeds] for w in words(s) if w not in GENERIC and len(w) > 2}
-    vendor_words = [set(words(v)) - GENERIC or set(words(v)) for v in vendors]
+    phrases = [words(v) for v in vendors]
 
-    def about_vendor(t):
-        # A vendor named in full, and nothing else but booking words: "papillon grand canyon" and "papillon reviews"
-        # stay, "papillon dog" goes.
-        tw = set(words(t))
-        return any(vw <= tw and tw - vw <= GENERIC | BOOKING for vw in vendor_words)
+    def about_vendor(t, vol):
+        # The vendor's name as a phrase, plus nothing but generic or booking words: "papillon reviews" stays, "papillon
+        # dog" goes, and "tours tasmania" does not admit every "tasmania tours" search. A name with one distinctive word
+        # is often a common word too (papillon, intrepid, go west), and its big searches are about that word, so above
+        # COMMON_WORD_VOLUME such an idea needs the CE's own words, which the anchor test already gives it.
+        tw = words(t)
+        for p in phrases:
+            if p and any(tw[i:i + len(p)] == p for i in range(len(tw) - len(p) + 1)) and set(tw) - set(p) <= GENERIC | BOOKING:
+                if len({w for w in p if w not in GENERIC and len(w) > 2}) > 1 or vol <= COMMON_WORD_VOLUME:
+                    return True
+        return False
 
-    rows = [(t, v) for t, v in ideas.items() if v >= MIN_VOLUME and (anchors & set(words(t)) or about_vendor(t))]
-    for s in [*seeds, *vendors]:
+    rows = [(t, v) for t, v in ideas.items() if v >= MIN_VOLUME and anchors & set(words(t))]
+    for s in seeds:
         if s not in dict(rows):
             rows.append((s, ideas.get(s, 0)))
-    return sorted(rows, key=lambda r: -r[1])[:MAX_KEYWORDS], sorted(anchors)
+    rows = sorted(rows, key=lambda r: -r[1])[:MAX_KEYWORDS]
+    # Operator searches are low volume next to the CE's generic ones, so they get their own room instead of competing
+    # for MAX_KEYWORDS: at Niagara the cap's cut-off is 880 searches a month, above most operators' own searches.
+    # Ideas from the vendor searches count only when they name a vendor; the rest of what those searches return is the
+    # region's generic tours ("tasmania tours" for Port Arthur), which the CE's own seeds already cover.
+    have = dict(rows)
+    pool = {**(vendor_ideas or {}), **ideas}
+    vendor_rows = [(t, v) for t, v in pool.items() if v >= MIN_VOLUME and t not in have and about_vendor(t, v)]
+    rows += sorted(vendor_rows, key=lambda r: -r[1])[:MAX_VENDOR_KEYWORDS]
+    return sorted(rows, key=lambda r: -r[1]), sorted(anchors)
 
 
 def main():
@@ -202,6 +219,8 @@ def main():
                    help="seeds: write seeds.json only; vendors: write vendor_seeds.json only; "
                         "finish: read Keyword Planner ideas from --ideas instead of the API")
     p.add_argument("--ideas", help="Keyword Planner's 'Download keyword ideas' CSV(s) for this CE, comma-separated")
+    p.add_argument("--vendor-ideas", help="the same for the searches on vendor seeds; their ideas count only when they "
+                                          "name a vendor")
     a = p.parse_args()
     src = pd.read_csv(HERE / "ce_sources.csv", dtype=str).set_index("ce")
     if a.ce not in src.index:
@@ -230,7 +249,10 @@ def main():
     vendors = [{"keyword": n, "category": "Vendor"} for n in dict.fromkeys(searchable(v["keyword"]) for v in vendors) if n]
     planner_seeds = [s["keyword"] for s in seeds] + [v["keyword"] for v in vendors]
     ideas = planner_csv(a.ideas.split(",")) if a.stage == "finish" else ideas_for(planner_seeds)
-    kept, anchors = keep(ideas, [s["keyword"] for s in seeds], row["name"], [v["keyword"] for v in vendors])
+    vendor_ideas = planner_csv(a.vendor_ideas.split(",")) if a.vendor_ideas else None
+    kept, anchors = keep(ideas, [s["keyword"] for s in seeds], row["name"], [v["keyword"] for v in vendors], vendor_ideas)
+    if vendor_ideas:
+        ideas = {**vendor_ideas, **ideas}
     pd.DataFrame([{"ce": a.ce, "term": t, "vol": v} for t, v in kept]).to_csv(snap / "eos_keywords.csv", index=False)
     (snap / "research.json").write_text(json.dumps({
         "ce": a.ce, "at": datetime.now().isoformat(timespec="seconds"), "model": MODEL, "effort": EFFORT,
