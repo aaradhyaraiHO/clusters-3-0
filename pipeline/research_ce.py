@@ -44,6 +44,9 @@ MAX_KEYWORDS = 1000
 GENERIC = set("""tickets ticket tours tour cruise cruises day trip trips the and of to from in at near best top cheap price prices
 cost book booking deals deal guided guide private group small half full city island islands park national things do visit
 visiting what how is are a for with by on hotel hotels map weather review reviews""".split())
+# What people add to an operator's name when they mean to book with it.
+BOOKING = set("""reservation reservations reservations contact phone number website login promo code coupon discount voucher
+gift card refund cancellation schedule hours open opening times rates booking online""".split())
 
 
 def seeds_for(src, llm):
@@ -56,6 +59,19 @@ def seeds_for(src, llm):
     answer = call_api(system, message) if llm == "api" or (llm == "auto" and has_api_credentials()) else call_cli(system, message)
     seeds = [{"keyword": s["keyword"].strip().lower(), "category": s.get("category")} for s in answer["seeds"] if s.get("keyword")]
     return seeds[:80]
+
+
+LEGAL = re.compile(r"[\s,]*\b(co\.?,?\s*ltd\.?|company limited|pty\.?\s*ltd\.?|pte\.?\s*ltd\.?|ltd\.?|limited|inc\.?|llc|"
+                   r"corporation|corp\.?|gmbh|s\.?a\.?s?|s\.?l\.?|b\.?v\.?)\s*$", re.I)
+
+
+def searchable(name):
+    """A vendor as people search for it: the trading name, without a legal suffix ("we love phuket co., ltd" -> "we love
+    phuket", "addictive entertainment - trading as bunyip tour" -> "bunyip tour")."""
+    name = re.split(r"\btrading as\b|\bt/a\b", name, flags=re.I)[-1]
+    while (short := LEGAL.sub("", name)) != name:
+        name = short
+    return re.sub(r"\s+", " ", name.strip(" -,.")).lower()
 
 
 def internal_vendors(ce):
@@ -110,7 +126,8 @@ def vendors_for(src, sheet, llm):
                     f"Candidates:\n{listing}\n\nReturn only {{\"vendors\": [...]}}, where the array is the JSON array the output "
                     "format defines. No other text.", "auto")
     kept = kept.get("vendors", kept) if isinstance(kept, dict) else kept
-    return [{"keyword": v["keyword"].strip().lower(), "category": "Vendor"} for v in kept if v.get("keyword")]
+    names = dict.fromkeys(searchable(v["keyword"]) for v in kept if v.get("keyword"))
+    return [{"keyword": n, "category": "Vendor"} for n in names if n]
 
 
 def call_web(system, message):
@@ -163,8 +180,14 @@ def keep(ideas, seeds, name, vendors=()):
     words are not anchors on their own: "see sight tours" would otherwise admit every idea with "see" in it."""
     anchors = {w for s in [name, *seeds] for w in words(s) if w not in GENERIC and len(w) > 2}
     vendor_words = [set(words(v)) - GENERIC or set(words(v)) for v in vendors]
-    rows = [(t, v) for t, v in ideas.items()
-            if v >= MIN_VOLUME and (anchors & set(words(t)) or any(vw <= set(words(t)) for vw in vendor_words))]
+
+    def about_vendor(t):
+        # A vendor named in full, and nothing else but booking words: "papillon grand canyon" and "papillon reviews"
+        # stay, "papillon dog" goes.
+        tw = set(words(t))
+        return any(vw <= tw and tw - vw <= GENERIC | BOOKING for vw in vendor_words)
+
+    rows = [(t, v) for t, v in ideas.items() if v >= MIN_VOLUME and (anchors & set(words(t)) or about_vendor(t))]
     for s in [*seeds, *vendors]:
         if s not in dict(rows):
             rows.append((s, ideas.get(s, 0)))
@@ -204,6 +227,7 @@ def main():
         if a.stage == "seeds":
             return
     vendors = json.loads(vendor_file.read_text())["vendors"] if vendor_file.exists() else []
+    vendors = [{"keyword": n, "category": "Vendor"} for n in dict.fromkeys(searchable(v["keyword"]) for v in vendors) if n]
     planner_seeds = [s["keyword"] for s in seeds] + [v["keyword"] for v in vendors]
     ideas = planner_csv(a.ideas.split(",")) if a.stage == "finish" else ideas_for(planner_seeds)
     kept, anchors = keep(ideas, [s["keyword"] for s in seeds], row["name"], [v["keyword"] for v in vendors])
