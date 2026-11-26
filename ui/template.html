@@ -642,6 +642,8 @@ h4.sh{font-size:14px;line-height:20px;font-weight:600}
 .tbl td .nopt{display:block}
 .tbl tbody td .dim{color:var(--fg4)}
 .tbl td.c-ent .dim{color:var(--fg)}
+/* Entity names and ranking URLs run long ("Milford Sound: Scenic Flights"): they wrap inside their column instead of running into the next. */
+.tbl td.c-ent .cell>span:first-child,.tbl td.c-rank .cell>span:first-child{white-space:normal;overflow-wrap:anywhere}.tbl td.c-ent .cell,.tbl td.c-rank .cell{min-width:0;max-width:100%}
 .tbl tbody td .lnk,.tbl tbody td .lnk.s,.tbl tbody td .thread,.tbl tbody select.isel.askadd{font-size:12px;line-height:16px;font-weight:500;color:var(--accent-ink)}
 .cn .tags{align-items:center}
 /* Controls: one 24px height everywhere in the table; those on a cell's first line lift 2px to share it with text. */
