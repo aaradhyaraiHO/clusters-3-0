@@ -400,6 +400,7 @@ input[type="checkbox"]:focus-visible{outline:2px solid var(--accent);outline-off
 .isel.set{color:var(--accent-ink);border-color:var(--accent)}
 .ptab td{vertical-align:middle}
 /* Vendor names run long ("phuket new generation travel (pnt phuket)"): they wrap rather than being cut off. */
+.pst{display:inline-block;font-size:11px;padding:0 6px;border-radius:4px;margin-right:6px;line-height:18px}.pst.live{background:var(--ok-bg,#e5f4e4);color:var(--ok,#1f6f3a)}.pst.plan{background:#efedff;color:#5b3fd6}.pst.rev{background:#f9eeda;color:#8a5a00}.pst.none{background:#f0efec;color:#5f5e5a}.purl{font-family:var(--mono,ui-monospace,monospace);font-size:12px}.purl .pname{font:inherit;width:auto;padding:0 2px;border-bottom:1px dashed #b4b2a9}.pmrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .ptab .pname{white-space:normal;overflow-wrap:anywhere;line-height:1.3}
 .ptab .isel{width:100%;max-width:none}
 .ptab .x{font-size:16px}
@@ -1081,7 +1082,7 @@ const G={
  cvr:['CVR','Google Ads conversions ÷ paid clicks, 90 days. Each keyword\'s conversions are split over clusters the way its CM1 is.','Google Ads keywords'],
  roi:['Paid ROI','Google Ads conversion value ÷ spend. Under 100% loses money; 140% is the target.','Google Ads'],
  ptype:['Page type','The page type from the cluster-to-page mapping prompt. It decides the entities and whether content reviews the page. Click to change; content checks it here before launch.','Page mapping'],
- url:['Page URL','The cluster’s page: a live page’s path, or the suggested URL for a page to build (from its focus keyword; click to edit, clear it for no page). The subdomain sits under it.','Payload + page planning'],
+ url:['Page','The cluster’s page. Live: an existing page (matched by the page_mapping prompt, or picked). Planned: the URL its page type gets under the MB URL guidelines, only the name part editable. Needs review: the page_mapping prompt was not sure an existing page covers it. The subdomain sits under it.','Payload, page prompts, MB URL guidelines'],
  page:['Page','The cluster\'s main microbrand page (home for the head term), and the page its core ad group sends paid clicks to (the ad\'s final URL). ⚠ when a buying cluster has its own page but its ad group lands elsewhere.','Payload pages + Google Ads ads (BigQuery)'],
  status:['Current status','What is wrong with the cluster, first rule that applies: Supply thin (no unique experience on sale), Not set up (own page chosen, no page yet), No traffic (under 100 paid clicks or coverage below its bar), Underperforming (ROI more than 5 points under its campaigns\' target, or under 100%), Working. Content clusters: page live or not.','Supply, pages, Google Ads'],
  lnch:['Launch','One Launch takes the cluster all the way: supply (growth or the BDM add an experience), the page (set up now when content need not review its page type, otherwise in the CE\'s Send to content), and its Perf ask, sent to Perf\'s tool once the page is live. After it, the cell says who the cluster waits on. Hold keeps a cluster out.','Your call'],
@@ -1143,7 +1144,9 @@ const hiddenNote=c=>c.shown!=null&&(c.clicks||0)>=PAID_FLOOR&&1-c.shown>=.3?`<sp
 const coverMeter=c=>{if(c.cover==null)return coverCell(c)+roiLine(c)+hiddenNote(c);const ok=c.cover>=lowBar(c)||(c.vol||0)<TH().minSearches;
   return `<span class="cov ${ok?'ok':'low'}" title="${ok?'At or above':'Below'} the ${pct(lowBar(c))} bar for ${(TYPE[typeOf(c)]||"other").toLowerCase()} clusters${c.cover>1?'. Over 100% because paid impressions come from every language while searches are English keyword volume':''}">${coverCell(c).replace(/<[^>]+>/g,' ').trim()}</span>${roiLine(c)}${hiddenNote(c)}`};
 const roiCell=c=>c.roi==null?'–':`<span style="color:${c.roi<1?'var(--bad)':c.roi>=1.4?'var(--ok)':'inherit'}">${pct(c.roi)}</span>`;
-const pathOf=p=>p.path.replace(HOST,'').replace(/^\/$/,'')||'/';
+// A page can sit on another site than the CE's own (Park Güell's on barcelona-tickets.com/park-guell): its host stays with it.
+const pageHost=p=>(String(p.path).match(/^(www\.[a-z0-9.-]+?\.(?:co\.[a-z]{2}|com\.[a-z]{2}|[a-z]{2,3}))(?=\/|$)/)||[])[1]||HOST;
+const pathOf=p=>p.path.replace(pageHost(p),'').replace(/^\/$/,'')||'/';
 // The CE's home: '/', a locale home, or the site's Theme page when it lives elsewhere (Park Güell's /home).
 const isHome=path=>/^\/([a-z]{2}\/)?$/.test(path||'')||(!!D.ce.home&&D.ce.home!=='/'&&String(path||'').replace(/\/+$/,'')===D.ce.home);
 
@@ -1152,7 +1155,7 @@ const isHome=path=>/^\/([a-z]{2}\/)?$/.test(path||'')||(!!D.ce.home&&D.ce.home!=
 // Buying clusters are where growth decides first (Parag, 10 Nov), so the intent filter opens on Transactional.
 const S={aview:'clusters',oppfilter:'open',pcard:null,kwOpen:false,mode:'analysis',chip:null,type:'all',sort:{key:'status',dir:1},psort:{key:'vol',dir:-1},q:'',sel:null,dtab:'kw',dfam:null,dq:'',dfilter:'all',dctx:null,pflt:null,
   sep:{},contentCall:{},stf:null,perfMark:{},hold:{},L:{},perfAt:{},contentAt:{},oppSent:{},perfReview:false,mergeAsk:null,moves:{},merged:{},names:{},intents:{},intentAsk:null,renaming:false,pstat:{},ptype:{},slug:{},sent:null,log:[],
-  layer:null,seeds:null,leave:[],leaveSug:new Set(),stab:'kw',partners:null,assign:{},cflt:null,open:new Set(),perfPick:{},supply:{},parent:{},closed:new Set(),comments:{},view:'list',pexp:new Set(),stAll:new Set(),oppState:{},oppc:null,opptype:'all',oppall:null,launch:null,launched:{},pagepop:null,kwfam:new Set(),agopen:new Set(),edit:false,kwAll:new Set(),kwAdd:{},focusWas:{},focusOk:{},flagOk:{},reviewed:null,sends:[],sentSig:{},lstate:{},lconfirm:null,types:new Set(['TRANSACTIONAL']),pageMap:{},pick:new Set(),kwSel:new Set(),kwMoveOpen:null,kwAddOpen:false,kwq:'',kwSug:[],uncAssign:{},th:JSON.parse(JSON.stringify({cover:{TRANSACTIONAL:.10,INFORMATIONAL:.05},minSearches:1000,conv:10,roi:1.4,lossSpend:50,newCE:false})),deleted:{},sepOk:{},subd:{},ask:{},subdUrl:{},ent:{}};
+  layer:null,pmap:{},seeds:null,leave:[],leaveSug:new Set(),stab:'kw',partners:null,assign:{},cflt:null,open:new Set(),perfPick:{},supply:{},parent:{},closed:new Set(),comments:{},view:'list',pexp:new Set(),stAll:new Set(),oppState:{},oppc:null,opptype:'all',oppall:null,launch:null,launched:{},pagepop:null,kwfam:new Set(),agopen:new Set(),edit:false,kwAll:new Set(),kwAdd:{},focusWas:{},focusOk:{},flagOk:{},reviewed:null,sends:[],sentSig:{},lstate:{},lconfirm:null,types:new Set(['TRANSACTIONAL']),pageMap:{},pick:new Set(),kwSel:new Set(),kwMoveOpen:null,kwAddOpen:false,kwq:'',kwSug:[],uncAssign:{},th:JSON.parse(JSON.stringify({cover:{TRANSACTIONAL:.10,INFORMATIONAL:.05},minSearches:1000,conv:10,roi:1.4,lossSpend:50,newCE:false})),deleted:{},sepOk:{},subd:{},ask:{},subdUrl:{},ent:{}};
 try{S.view=localStorage.getItem('clusters-view')||'list'}catch(e){}
 const PREVIEW_NEW=/[?&]preview=newce/.test(location.search);
 if(PREVIEW_NEW)C.forEach(c=>{c.adg={state:'missing'};c.clicks=0;c.spend=0;c.google_value=0;c.cm1=0;c.impr=0;c.roi=null;c.cpc=null;c.rpc=null;c.target='Not';c.theme=null;c.land=null;c.pages=[];c.organic={clicks:0,impr:0,position:null};c.oc=0});
@@ -1844,7 +1847,22 @@ function entCellX(c,kind){const s=entSlot(c,kind);
   if(s.state==='created')return '<span class="pill ok">Created</span>';
   if(s.state==='none')return `<span class="pill mute">${s.rule==='optional'?'Optional':'Not needed'}</span>`;
   return '<span class="pill acc">Will create</span>'}
-const slugOf=c=>S.slug[c.id]||slugify(focusLabel(c)||nm(c));
+/* MB URL guidelines (the "MB URLs" sheet, Shoulder Page tab): a page's URL is the CE's page plus a slug set by its page
+   type. {name} types take a name from the cluster's focus keyword, the CE's own words aside; only that part is edited. */
+const TYPE_SLUG={'Landing Page':'','Tours':'{name}','Guided Tours':'guided-tours','Audio Guide Tours':'audio-guide','Private Tours':'private-tours',
+  'Combos':'{name}','Skip-the-Line':'skip-the-line','Night Tours':'night-tours','Branded Collection':'{name}','Sub-Attraction A':'{name}',
+  'Sub-Attraction B':'{name}','Sub-Attraction C':'{name}','Non-POI: Area':'{name}','Non-POI: Sub_experience':'{name}','Non-POI: A-to-B Day Trip':'{name}',
+  'Plan Your Visit':'plan-your-visit','Timings':'timings','Getting There':'location','Parking':'parking','Rules & Requirements':'rules-and-regulations',
+  'Dress Code':'dress-code','Tips':'tips','Shopping':'shop','Restaurants':'restaurants','Weather':'weather','Things to Do Nearby':'things-to-do-near-{ce}',
+  'Exhibitions & Events':'exhibition-events','Map':'map','Entrance':'entrances','Boarding Points':'boarding-points','Halloween Events':'halloween',
+  'Christmas Events':'christmas',"New Year's Eve Events":'new-years-eve','About':'about','History':'history','Architecture':'architecture','Facts':'facts',
+  'Inside / Zones':'what-to-see-inside','Collections':'artwork-collections','Artwork Specific':'{name}','Artist':'{name}','Things to Do':'things-to-do','Custom Page':'{name}'};
+const BASE=(String(D.ce.home||'/').replace(/\/+$/,''))+'/';
+const ceSlug=()=>slugify(D.ce.name).slice(1);
+const nameOf=c=>S.slug[c.id]?S.slug[c.id].replace(/^\/|\/$/g,'').split('/').pop():(slugify([...words(focusLabel(c)||nm(c))].join(' ')).slice(1)||slugify(nm(c)).slice(1)||'page');
+const typeSlug=c=>{const t=TYPE_SLUG[pageTypeOf(c)];return t===undefined?'{name}':t};
+const namedType=c=>typeSlug(c).includes('{name}');
+const slugOf=c=>{const t=typeSlug(c).replace('{name}',nameOf(c)).replace('{ce}',ceSlug());return t?BASE+t+'/':BASE};
 // A subfolder slug: lower case, hyphens, slashes only between parts. "/Kayak Tours/" → "/kayak-tours".
 const cleanSlug=v=>'/'+String(v||'').trim().toLowerCase().replace(/^\/+|\/+$/g,'').split('/').map(x=>x.replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')).filter(Boolean).join('/');
 const normPath=p=>String(p||'').replace(/\/+$/,'')||'/';
@@ -2090,10 +2108,17 @@ function slugTaken(c){const s=normPath(slugOf(c));if(c.pages.length)return null;
   return owner?nm(owner):livePaths().has(s)?'a live page':null}
 function urlCell(c){if(OTHER(c))return '<span class="dim">–</span>';
   const sd=subdOn(c), subLine=sd?`<span class="sdrow"><span class="s">Subdomain</span><input class="plainin" data-subdurl="${c.id}" value="${esc(subdUrlOf(c))}" aria-label="Subdomain for ${esc(nm(c))}" title="Suggested from its focus keyword. Click to edit; clear it to go back to the suggestion"></span><button class="lnk s" data-subdtog="${c.id}" aria-label="Remove the subdomain">Remove subdomain</button>`:`<button class="lnk s" data-subdtog="${c.id}">+ subdomain</button>`;
-  if(c.pages.length)return `<span class="cell">${urlBtn(pathOf(mainPage(c)||c.pages[0]))}${subLine}</span>`;
-  if(sepOf(c)!=='yes')return `<span class="cell"><span class="dim">${TR(c)?'No page planned':'Content’s call'}</span><button class="lnk s" data-urladd="${c.id}">+ Add a URL</button></span>`;
-  const taken=slugTaken(c);
-  return `<span class="cell"><input class="plainin${taken?' bad':''}" data-urlslug="${c.id}" value="${esc(slugOf(c))}" aria-label="Page URL for ${esc(nm(c))}" title="Suggested from its focus keyword. Click to edit; clear it for no page">${taken?`<span class="s warn">already used by ${esc(taken)}</span>`:''}${subLine}</span>`}
+  const picked=S.pmap[c.id], ai=c.page_ai||{};
+  if(c.pages.length){const mp=mainPage(c)||c.pages[0];return `<span class="cell"><span><span class="pst live">Live</span>${urlBtn(pathOf(mp),undefined,pageHost(mp))}</span>${subLine}</span>`}
+  if(picked&&picked!=='none')return `<span class="cell"><span><span class="pst live">Live</span>${urlBtn(picked)}</span><span class="s">Picked by you · <button class="lnk s" data-pmapundo="${c.id}">Undo</button></span></span>`;
+  if(ai.mapping==='needs_review'&&!picked&&!(c.id in S.sep)){const opts=[...livePaths()].sort();
+    return `<span class="cell"><span><span class="pst rev">Needs review</span><span class="s">An existing page may cover it</span></span><span class="pmrow"><select class="isel" data-pmap="${c.id}" aria-label="Existing page for ${esc(nm(c))}"><option value="">Pick a page</option>${opts.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}</select><button class="lnk s" data-pmapnone="${c.id}">No page covers it</button></span></span>`}
+  const sep=sepOf(c);
+  if(sep==='no')return `<span class="cell"><span><span class="pst none">No own page</span><span class="s">${TR(c)?'Lands on the CE’s page':'A section of another page'}</span></span><button class="lnk s" data-urladd="${c.id}">Ask for a page</button></span>`;
+  if(sep!=='yes')return `<span class="cell"><span><span class="pst none">Own page: not sure</span><span class="s">If yes: ${esc(slugOf(c))}</span></span><span class="pmrow"><button class="lnk s" data-urladd="${c.id}">Make it a page</button><button class="lnk s" data-sepset="${c.id}:no">Keep as a section</button></span></span>`;
+  const taken=slugTaken(c), base=slugOf(c), nameAt=namedType(c)?base.lastIndexOf(nameOf(c)):-1;
+  const url=nameAt<0?`<span class="purl">${esc(base)}</span>`:`<span class="purl">${esc(base.slice(0,nameAt))}<input class="plainin pname" data-urlname="${c.id}" value="${esc(nameOf(c))}" size="${Math.max(6,nameOf(c).length)}" aria-label="Page name for ${esc(nm(c))}" title="The name part of the URL. Click to edit">/</span>`;
+  return `<span class="cell"><span><span class="pst plan">Planned</span>${url}</span><span class="s${taken?' warn':''}">${taken?`Already used by ${esc(taken)}`:`MB URL guidelines: ${esc(TYPE_SLUG[pageTypeOf(c)]??'{name}')||'the CE’s page'}/`}</span>${subLine}</span>`}
 const slugify=s=>'/'+String(s).toLowerCase().replace(/\(.*?\)/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 /* The seeds prompt's seeds and what became of each (export_hybrid.research_block). A CE EOS researched has none of ours,
    so its clusters' top keywords stand in. Seeds saved before the research list existed are replaced; ones you added stay. */
@@ -2708,10 +2733,12 @@ function act(sel,el){
     S.parent[c.id]=to;logChange(to?`Put <b>${esc(nm(c))}</b> under ${esc(nm(byId[to]))}`:`Took <b>${esc(nm(c))}</b> out of ${esc(from?nm(byId[from]):'its parent')}`,()=>{if(was===undefined)delete S.parent[c.id];else S.parent[c.id]=was})}
 }
 document.addEventListener('click',e=>{
-  const t=e.target.closest('[data-subdtog],[data-urladd],[data-entset],[data-sgo],[data-vmenu],[data-l5],[data-hold],[data-oppsend],[data-stall],[data-assignok],[data-askaside],[data-mode],[data-chip],[data-row],[data-close],[data-dtab],[data-dfilter],[data-ssort],[data-dfam],[data-dfamclear],[data-mergeok],[data-mergeno],[data-stf],[data-tocontent],[data-tocontentall],[data-pmark],[data-perfreview],[data-clearsaved],[data-leaveok],[data-leaveno],[data-cell],[data-ptheme],[data-pclear],[data-layer],[data-undo],[data-seedadd],[data-seeddel],[data-leaveadd],[data-leavedel],[data-rerun],[data-pagelaunch],[data-sendperf],[data-intentok],[data-intentno],[data-renameok],[data-renameno],[data-grp],[data-kwfam],[data-agopen],[data-pagepop],[data-pageclose],[data-launch],[data-lclose],[data-lstart],[data-lans],[data-lfinish],[data-oppc],[data-oppall],[data-oppok],[data-oppno],[data-opptype],[data-allgroups],[data-type],[data-sort],[data-psort],[data-par],[data-cmtadd],[data-cmtdel],[data-copy],[data-view],[data-pexp],[data-stab],[data-partneradd],[data-partnerdel],[data-edit],[data-mergesel],[data-delsel],[data-sepok],[data-sepset],[data-askok],[data-askundo],[data-sepundo],[data-oppundo],[data-aview],[data-oppbulk],[data-oppfilter],[data-gogate],[data-pcard],[data-kwall],[data-kwadd],[data-kwact],[data-kwaddopen],[data-kwbulkremove],[data-kwbulkclear],[data-renamestart],[data-kwsug],[data-uncnew],[data-uncleave],[data-threset],[data-flagundo],[data-flagmove],[data-reviewed],[data-send],[data-copypkg],[data-golaunch],[data-launchall],[data-flagsup],[data-lcancel],[data-lgo],[data-itype]');
+  const t=e.target.closest('[data-pmapnone],[data-pmapundo],[data-subdtog],[data-urladd],[data-entset],[data-sgo],[data-vmenu],[data-l5],[data-hold],[data-oppsend],[data-stall],[data-assignok],[data-askaside],[data-mode],[data-chip],[data-row],[data-close],[data-dtab],[data-dfilter],[data-ssort],[data-dfam],[data-dfamclear],[data-mergeok],[data-mergeno],[data-stf],[data-tocontent],[data-tocontentall],[data-pmark],[data-perfreview],[data-clearsaved],[data-leaveok],[data-leaveno],[data-cell],[data-ptheme],[data-pclear],[data-layer],[data-undo],[data-seedadd],[data-seeddel],[data-leaveadd],[data-leavedel],[data-rerun],[data-pagelaunch],[data-sendperf],[data-intentok],[data-intentno],[data-renameok],[data-renameno],[data-grp],[data-kwfam],[data-agopen],[data-pagepop],[data-pageclose],[data-launch],[data-lclose],[data-lstart],[data-lans],[data-lfinish],[data-oppc],[data-oppall],[data-oppok],[data-oppno],[data-opptype],[data-allgroups],[data-type],[data-sort],[data-psort],[data-par],[data-cmtadd],[data-cmtdel],[data-copy],[data-view],[data-pexp],[data-stab],[data-partneradd],[data-partnerdel],[data-edit],[data-mergesel],[data-delsel],[data-sepok],[data-sepset],[data-askok],[data-askundo],[data-sepundo],[data-oppundo],[data-aview],[data-oppbulk],[data-oppfilter],[data-gogate],[data-pcard],[data-kwall],[data-kwadd],[data-kwact],[data-kwaddopen],[data-kwbulkremove],[data-kwbulkclear],[data-renamestart],[data-kwsug],[data-uncnew],[data-uncleave],[data-threset],[data-flagundo],[data-flagmove],[data-reviewed],[data-send],[data-copypkg],[data-golaunch],[data-launchall],[data-flagsup],[data-lcancel],[data-lgo],[data-itype]');
   if(!t||e.target.closest('select,input'))return;const d=t.dataset;
   if(d.subdtog!==undefined){const c=byId[d.subdtog],had=c.id in S.subd,was=S.subd[c.id],to=!subdOn(c);S.subd[c.id]=to;
     logChange(`Subdomain for <b>${esc(nm(c))}</b>: ${to?esc(subdUrlOf(c)):'none'}`,()=>{if(had)S.subd[c.id]=was;else delete S.subd[c.id]})}
+  else if(d.pmapnone){const c=byId[d.pmapnone];S.pmap[c.id]='none';logChange(`No existing page covers <b>${esc(nm(c))}</b>`,()=>{delete S.pmap[c.id]})}
+  else if(d.pmapundo){const c=byId[d.pmapundo],was=S.pmap[c.id];delete S.pmap[c.id];logChange(`Page pick for <b>${esc(nm(c))}</b> undone`,()=>{S.pmap[c.id]=was})}
   else if(d.urladd!==undefined){const c=byId[d.urladd],had=c.id in S.sep,was=S.sep[c.id];S.sep[c.id]='yes';
     logChange(`Page for <b>${esc(nm(c))}</b> at ${esc(slugOf(c))}`,()=>{if(had)S.sep[c.id]=was;else delete S.sep[c.id]})}
   else   if(d.entset!==undefined){const [cid,kind,v]=d.entset.split('|'),c=byId[cid],key=`${cid}|${kind}`,had=key in S.ent,was=S.ent[key];S.ent[key]=v;
@@ -2931,6 +2958,9 @@ document.addEventListener('change',e=>{const t=e.target, d=t.dataset;
     logChange(v==='leave'?`Removed <b>${esc(kw)}</b> from ${esc(nm(byId[cid]))}`:v?`Moved <b>${esc(kw)}</b> from ${esc(nm(byId[cid]))} to ${esc(nm(byId[v]))}`:`Put <b>${esc(kw)}</b> back in ${esc(nm(byId[cid]))}`,()=>{if(was)S.moves[key]=was;else delete S.moves[key]})}
   else if(d.act){act(d.act,t)}
   else if(d.ptype){const c=byId[d.ptype],was=pageTypeOf(c);S.ptype[c.id]=t.value;logChange(`Page type for <b>${esc(nm(c))}</b>: ${esc(was)} → ${esc(t.value)} (content)`,()=>{delete S.ptype[c.id]})}
+  else if(d.pmap){const c=byId[d.pmap],v=t.value;if(!v)return;S.pmap[c.id]=v;logChange(`<b>${esc(nm(c))}</b> is covered by ${esc(v)}`,()=>{delete S.pmap[c.id]})}
+  else if(d.urlname){const c=byId[d.urlname],was=S.slug[c.id],v=cleanSlug(t.value).slice(1);if(!v){toast('A page name cannot be empty.');render();return}
+    if(v===nameOf(c)){render();return}S.slug[c.id]='/'+v;logChange(`Page name for <b>${esc(nm(c))}</b>: ${esc(v)}`,()=>{if(was===undefined)delete S.slug[c.id];else S.slug[c.id]=was})}
   else if(d.urlslug){const c=byId[d.urlslug],had=c.id in S.sep,wasSep=S.sep[c.id],wasSlug=S.slug[c.id],raw=t.value.trim();
     // Clearing the URL is the "no page" answer; typing one keeps or makes it a page.
     if(!raw){S.sep[c.id]='no';logChange(`No page for <b>${esc(nm(c))}</b> (URL cleared)`,()=>{if(had)S.sep[c.id]=wasSep;else delete S.sep[c.id]})}
@@ -2958,7 +2988,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='cmtin
 const STATE_KEY='clusters-state-'+D.ce.id;
 const KEEP=['sep','ask','supply','oppState','assign','flagOk','reviewed','moves','merged','deleted','names','intents','ptype','slug','subd','subdUrl',
   'sends','sentContent','sentPerf','sentSig','lastSnap','lstate','contentCall','leave','leaveSug','kwAdd','focusOk','focusWas','sepOk','th','pageMap',
-  'uncAssign','pstat','perfPick','seeds','mergeOps','perfMark','hold','L','perfAt','contentAt','oppSent','ent'];
+  'pmap','uncAssign','pstat','perfPick','seeds','mergeOps','perfMark','hold','L','perfAt','contentAt','oppSent','ent'];
 const SETS=new Set(['sentContent','sentPerf','leaveSug']);
 const normName=v=>String(v||'').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
 let saveT=null;

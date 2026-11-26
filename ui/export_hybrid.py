@@ -1395,8 +1395,12 @@ def searched_products(cl):
 
 
 # The CE's home is its Payload "Theme" page: the bare host on most sites, /home on Park Güell's.
-_pg_all = pd.read_csv(HERE / "hybrid" / "pages_189.csv" if CE == 189 else OUT / f"pages_{CE}.csv", usecols=["uid", "page_type"])
-_theme = _pg_all.loc[(_pg_all["page_type"] == "Theme") & _pg_all["uid"].str.startswith(HOST), "uid"]
+_pg_all = pd.read_csv(HERE / "hybrid" / "pages_189.csv" if CE == 189 else OUT / f"pages_{CE}.csv", usecols=["uid", "page_type", "collection_id"],
+                      dtype={"collection_id": str})
+_theme = _pg_all.loc[(_pg_all["page_type"] == "Theme") & _pg_all["uid"].str.startswith(HOST)]
+# On a city site every CE has a Theme page; the CE's own lists its collection. The page column builds new URLs under it.
+_own = _theme[_theme["collection_id"].fillna("").str.split(".").str[0] == str(CE if CE == 189 else CFG.get("eos_id") or CE)]
+_theme = (_own if len(_own) else _theme)["uid"]
 HOME_PATH = "/" + "/".join(_theme.iloc[0].split(".")[len(HOST.split(".")):]) if len(_theme) else "/"
 
 
