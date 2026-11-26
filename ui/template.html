@@ -400,7 +400,7 @@ input[type="checkbox"]:focus-visible{outline:2px solid var(--accent);outline-off
 .isel.set{color:var(--accent-ink);border-color:var(--accent)}
 .ptab td{vertical-align:middle}
 /* Vendor names run long ("phuket new generation travel (pnt phuket)"): they wrap rather than being cut off. */
-.purl{font-family:ui-monospace,monospace;font-size:12px;white-space:nowrap}.purl input.pname{height:auto;min-height:0;line-height:inherit;box-shadow:none;font:inherit;color:var(--fg);border:0;border-bottom:1px dashed var(--line);border-radius:0;background:transparent;padding:0;margin:0;width:auto;outline:none}.purl input.pname:focus{border-bottom-color:var(--accent,#8000ff)}.pmrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.purl{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,monospace;font-size:12px;white-space:nowrap}.lcell{min-width:0;width:100%}.lrow{display:flex;gap:6px;align-items:baseline;max-width:100%;min-width:0;white-space:nowrap}.lrow>a{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lrow>.s,.lrow>button{flex:none}.pdiff{font-size:11px;color:var(--warn);cursor:help;white-space:nowrap}select.pmsel{max-width:100%;font-size:11px;margin-top:2px}.lcell .pglink,.cell .url{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}.purl input.pname{height:auto;min-height:0;line-height:inherit;box-shadow:none;font:inherit;color:var(--fg);border:0;border-bottom:1px dashed var(--line);border-radius:0;background:transparent;padding:0;margin:0;width:auto;outline:none}.purl input.pname:focus{border-bottom-color:var(--accent,#8000ff)}.pmrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .ptab .pname{white-space:normal;overflow-wrap:anywhere;line-height:1.3}
 .ptab .isel{width:100%;max-width:none}
 .ptab .x{font-size:16px}
@@ -1215,13 +1215,14 @@ function mainPage(c){
    group. A warning needs the cluster to own a page, 100+ paid clicks and most of them landing elsewhere. */
 function pageCell(c){
   if(!HASPAID)return '<span class="dim">–</span>';
-  const L=landOf(c);if(!L||!(c.clicks||0))return `<span class="cell"><span class="dim">No paid clicks</span></span>`;
-  const host=L.host&&L.host!==ROOT_DOMAIN?'www.'+L.host:HOST, label=isHome(L.path)?'/ (home)':esc(L.path);
-  const head=`<span title="Estimated: the landing pages of the ad groups that served its searches, weighted by its share of each">${urlBtn(isHome(L.path)?'/':L.path,label,host)} <span class="s">${pct(L.share)} of its clicks</span></span>`;
-  let sub='';
-  if(L.own)sub=L.onOwn>=0.5?'<span class="s ok">Its page</span>':landsOff(c)?`<span class="s warn">Its page is ${esc(L.own)}: ${pct(L.onOwn)} land there</span>`:`<span class="s">Its page is ${esc(L.own)} (${pct(L.onOwn)} land there)</span>`;
-  else if(sepOf(c)==='yes')sub=`<span class="s">Moves to ${esc(slugOf(c))} once that page is live</span>`;
-  return `<span class="cell">${head}${sub}</span>`;
+  const L=landOf(c), clicks=c.clicks||0;if(!L||!clicks)return `<span class="cell"><span class="dim">No paid clicks</span></span>`;
+  const host=L.host&&L.host!==ROOT_DOMAIN?'www.'+L.host:HOST, short=isHome(L.path)?'/ (home)':shortPath(L.path);
+  const why=`${pct(L.share)} of its ${n(clicks)} paid clicks land on ${isHome(L.path)?'the home page':L.path}${L.own?`; ${pct(L.onOwn)} on its page ${L.own}`:''}. Estimated from the ad groups that served its searches.`;
+  const sub=!L.own?(sepOf(c)==='yes'?`<span class="s">→ ${esc(shortPath(slugOf(c)))} when live</span>`:'')
+    :L.onOwn>=0.5?'<span class="s ok">✓ its page</span>'
+    :landsOff(c)?`<span class="s warn">⚠ not its page (${esc(shortPath(L.own))}, ${pct(L.onOwn)})</span>`
+    :`<span class="s">its page ${esc(shortPath(L.own))}, ${pct(L.onOwn)}</span>`;
+  return `<span class="cell lcell" title="${esc(why)}"><span class="lrow">${urlBtn(isHome(L.path)?'/':L.path,esc(short),host)}<span class="s">${pct(L.share)}</span></span>${sub}</span>`;
 }
 /* Own ad group from the cluster's focus keyword (Parag, 30 Oct): full = the live ad group with most clicks that bids on it
    also bids on most of the cluster's keyword volume; focus = only the focus keyword is there; missing = no live ad group
@@ -1409,7 +1410,15 @@ function landOf(c){const lp=DR.clusters[c.id]?.lp||[];if(!lp.length)return null;
 // A mismatch is worth Perf's time only on a buying cluster with clicks enough to act on: ads for an informational search
 // landing on home, where people buy, can be deliberate.
 const LAND_MIN=20;
-function landsOff(c){const L=landOf(c);return !!L&&!!L.own&&!L.ownHome&&TR(c)&&(c.clicks||0)>=LAND_MIN&&L.onOwn<0.5}
+// The cluster's page counts only when the match is sure: page_mapping found that page, or a POI, operator, collection,
+// entity or name link placed it there and page_mapping did not say no existing page covers the cluster (Everglades'
+// Entrance Fee sits on /things-to-do/ by a loose name match the prompt rejects).
+const SURE_HOW=new Set(['poi','operator','collection','entity','name','text+tag','page_mapping prompt']);
+function pageSure(c){const mp=mainPage(c);if(!mp)return !!(S.pmap[c.id]&&S.pmap[c.id]!=='none');const ai=c.page_ai||{};
+  if(ai.mapping==='existing_page'&&ai.existing_page_url&&normPath(pathOf({path:ai.existing_page_url.replace(/^https?:\/\//,'')}))===normPath(pathOf(mp)))return true;
+  return SURE_HOW.has(mp.how)&&ai.mapping!=='no_existing_page'}
+// Worth a Perf ask: a buying cluster with clicks enough to act on, whose sure, selling page gets under half its clicks.
+function landsOff(c){const L=landOf(c);return !!L&&!!L.own&&!L.ownHome&&TR(c)&&(c.clicks||0)>=LAND_MIN&&L.onOwn<0.5&&sellsPage(c)&&pageSure(c)}
 const landTxt=c=>{const L=landOf(c);return L?(isHome(L.path)?'the home page':esc(L.path)):''};
 /* The opportunity tree (Aditya, 5 Nov) on the page type from the mapping prompt. `step` records each question as it is
    asked, so the Paid tab shows the exact path that drafted the ask. */
@@ -1866,6 +1875,7 @@ const TYPE_SLUG={'Landing Page':'','Tours':'{name}','Guided Tours':'guided-tours
   'Christmas Events':'christmas',"New Year's Eve Events":'new-years-eve','About':'about','History':'history','Architecture':'architecture','Facts':'facts',
   'Inside / Zones':'what-to-see-inside','Collections':'artwork-collections','Artwork Specific':'{name}','Artist':'{name}','Things to Do':'things-to-do','Custom Page':'{name}'};
 const BASE=(String(D.ce.home||'/').replace(/\/+$/,''))+'/';
+const shortPath=p=>{p=String(p||'');return BASE!=='/'&&p.startsWith(BASE)&&p.length>BASE.length?'…/'+p.slice(BASE.length):p};
 const ceSlug=()=>slugify(D.ce.name).slice(1);
 // A planned page's name: the cluster's name without the CE's place words, keeping what it sells ("Milford Sound Helicopter
 // Tour" -> helicopter-tours; the guidelines' own slugs are plural: guided-tours, night-tours).
@@ -2130,24 +2140,26 @@ function likelyPage(c){const want=new Set([...words(nm(c)),...words(focusLabel(c
   let best=null;pages.forEach(p=>{const hit=[...words(p.text)].filter(w=>want.has(w)).length;if(hit&&(!best||hit>best.hit))best={...p,hit}});return best}
 function urlCell(c){if(OTHER(c))return '<span class="dim">–</span>';
   const sd=subdOn(c), subLine=sd?`<span class="sdrow"><span class="s">Subdomain</span><input class="plainin" data-subdurl="${c.id}" value="${esc(subdUrlOf(c))}" aria-label="Subdomain for ${esc(nm(c))}" title="Suggested from its focus keyword. Click to edit; clear it to go back to the suggestion"></span><button class="lnk s" data-subdtog="${c.id}" aria-label="Remove the subdomain">Remove subdomain</button>`:`<button class="lnk s" data-subdtog="${c.id}">+ subdomain</button>`;
-  const picked=S.pmap[c.id], ai=c.page_ai||{}, note=(txt,cls='')=>`<span class="s${cls}">${txt}</span>`;
-  // A saved choice that differs from the separate_page prompt says so; the prompt's answer stays visible.
-  const aiS=ai.separate_page, mineDiff=c.id in S.sep&&aiS&&S.sep[c.id]!==aiS?` · your choice; the prompt said ${aiS==='not_sure'?'not sure':aiS}`:'';
+  const picked=S.pmap[c.id], ai=c.page_ai||{}, note=(txt,cls='',tip='')=>`<span class="s${cls}"${tip?` title="${esc(tip)}"`:''}>${txt}</span>`;
+  // A saved own-page choice that differs from the separate_page prompt: a small marker, the detail on hover.
+  const aiS=ai.separate_page, diff=c.id in S.sep&&aiS&&S.sep[c.id]!==aiS?` <span class="pdiff" title="You set own page to ${S.sep[c.id]}; the separate_page prompt said ${aiS==='not_sure'?'not sure':aiS}">≠ prompt</span>`:'';
   const owner=p=>C.find(x=>x.id!==c.id&&!OTHER(x)&&x.pages.some(q=>normPath(pathOf(q))===normPath(p)));
-  const mergeBtn=o=>`<button class="lnk s" data-mergewith="${c.id}|${o.id}">Merge with ${esc(nm(o))}</button>`;
-  if(c.pages.length){const mp=mainPage(c)||c.pages[0];return `<span class="cell">${urlBtn(pathOf(mp),undefined,pageHost(mp))}${note('Live')}${subLine}</span>`}
-  if(picked&&picked!=='none'){const o=owner(picked);return `<span class="cell">${urlBtn(picked)}${note(`Live · picked by you · <button class="lnk s" data-pmapundo="${c.id}">Undo</button>`)}${o?note(`Also ${esc(nm(o))}'s page`,' warn')+mergeBtn(o):''}</span>`}
+  const mergeBtn=o=>`<button class="lnk s" data-mergewith="${c.id}|${o.id}" title="Same page and the same searches as ${esc(nm(o))}">Merge with ${esc(nm(o))}</button>`;
+  const link=(p,h0)=>urlBtn(p,esc(shortPath(p)),h0);
+  if(c.pages.length){const mp=mainPage(c)||c.pages[0];return `<span class="cell">${link(pathOf(mp),pageHost(mp))}${note('Live')}${subLine}</span>`}
+  if(picked&&picked!=='none'){const o=owner(picked);return `<span class="cell">${link(picked)}${note(`Live · <button class="lnk s" data-pmapundo="${c.id}">Undo pick</button>`)}${o?mergeBtn(o):''}</span>`}
+  const st=S.lstate[c.id]==='launched'?'<span class="pill ok">Launched</span>':S.lstate[c.id]==='flagged'?'<span class="pill warn">Supply flagged</span>':S.sentContent?.has(c.id)||S.pstat[c.id]?'<span class="pill acc">With content</span>':'';
+  if(st)return `<span class="cell"><span class="purl" title="${esc(slugOf(c))}">${esc(shortPath(slugOf(c)))}</span>${st}</span>`;
   if(ai.mapping==='needs_review'&&!picked&&!(c.id in S.sep)){const opts=[...livePaths()].sort(), lk=likelyPage(c), o=lk&&owner(lk.path);
-    const top=lk?`<span>${urlBtn(lk.path)} <button class="lnk s" data-pmapuse="${c.id}|${esc(lk.path)}">Use it</button></span>${note(`Likely page${o?`, already ${esc(nm(o))}'s`:''} · needs review`,' warn')}${o&&o.vol===c.vol?note(`Same searches as ${esc(nm(o))} (${k(c.vol)}/mo): one demand`)+mergeBtn(o):''}`:note('Needs review: an existing page may cover it',' warn');
-    return `<span class="cell">${top}<span class="pmrow"><select class="isel" data-pmap="${c.id}" aria-label="Existing page for ${esc(nm(c))}"><option value="">${lk?'Another page':'Pick a page'}</option>${opts.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}</select><button class="lnk s" data-pmapnone="${c.id}">No page covers it</button></span></span>`}
-  const st=S.lstate[c.id]==='launched'?'<span class="pill ok">Launched</span>':S.lstate[c.id]==='flagged'?'<span class="pill warn">Supply flagged by content</span>':S.sentContent?.has(c.id)||S.pstat[c.id]?'<span class="pill acc">With content</span>':'';
-  if(st)return `<span class="cell"><span class="purl">${esc(slugOf(c))}</span>${st}</span>`;
+    const pick=`<select class="isel pmsel" data-pmap="${c.id}" aria-label="Existing page for ${esc(nm(c))}"><option value="">${lk?'Other…':'Pick a page'}</option><option value="__none">None covers it</option>${opts.map(p=>`<option value="${esc(p)}">${esc(shortPath(p))}</option>`).join('')}</select>`;
+    return `<span class="cell">${lk?`<span class="lrow">${link(lk.path)}<button class="lnk s" data-pmapuse="${c.id}|${esc(lk.path)}">Use</button></span>`:''}${note(lk?'Likely page · review':'Review: a page may cover it',' warn',"The page_mapping prompt was not sure an existing page covers this cluster")}${o&&o.vol===c.vol?mergeBtn(o):''}${pick}</span>`}
   const sep=sepOf(c);
-  if(sep==='no')return `<span class="cell"><span class="dim">No page of its own</span>${note((TR(c)?'Lands on the CE’s page':'A section of another page')+mineDiff)}<button class="lnk s" data-urladd="${c.id}">Ask for a page</button></span>`;
-  if(sep!=='yes')return `<span class="cell"><span class="dim">${esc(slugOf(c))}</span>${note('Own page not decided')}<span class="pmrow"><button class="lnk s" data-urladd="${c.id}">Make it a page</button><button class="lnk s" data-sepset="${c.id}:no">Keep as a section</button></span></span>`;
-  const taken=slugTaken(c), base=slugOf(c), nm0=nameOf(c), nameAt=namedType(c)?base.lastIndexOf(nm0):-1;
-  const url=nameAt<0?`<span class="purl">${esc(base)}</span>`:`<span class="purl">${esc(base.slice(0,nameAt))}<input class="pname" data-urlname="${c.id}" value="${esc(nm0)}" style="width:${Math.max(4,nm0.length)}ch" oninput="this.style.width=Math.max(4,this.value.length)+'ch'" aria-label="Page name for ${esc(nm(c))}" title="Click to edit the name in the URL">/</span>`;
-  return `<span class="cell">${url}${taken?note(`Already used by ${esc(taken)}`,' warn'):note(`Planned · ${esc(ptLabel(pageTypeOf(c)))} page, URL from the guidelines${mineDiff}`)}${subLine}</span>`}
+  if(sep==='no')return `<span class="cell"><span class="dim">No own page</span><span class="s"><button class="lnk s" data-urladd="${c.id}">Ask for one</button>${diff}</span></span>`;
+  if(sep!=='yes')return `<span class="cell"><span class="purl dim" title="${esc(slugOf(c))}">${esc(shortPath(slugOf(c)))}</span><span class="s">Own page? <button class="lnk s" data-urladd="${c.id}">Yes</button> · <button class="lnk s" data-sepset="${c.id}:no">No</button></span></span>`;
+  const taken=slugTaken(c), base=slugOf(c), nm0=nameOf(c), nameAt=namedType(c)?base.lastIndexOf(nm0):-1, sb=shortPath(base);
+  const url=nameAt<0?`<span class="purl" title="${esc(base)}">${esc(sb)}</span>`:`<span class="purl" title="${esc(base)}">${esc(shortPath(base.slice(0,nameAt)))}<input class="pname" data-urlname="${c.id}" value="${esc(nm0)}" style="width:${Math.max(4,nm0.length)}ch" oninput="this.style.width=Math.max(4,this.value.length)+'ch'" aria-label="Page name for ${esc(nm(c))}" title="Click to edit the name in the URL">/</span>`;
+  const pt=ptLabel(pageTypeOf(c));
+  return `<span class="cell">${url}${taken?note(`Used by ${esc(taken)}`,' warn'):`<span class="s" title="URL from the MB URL guidelines for a ${esc(pt)} page">Planned · ${esc(pt)}${diff}</span>`}${subLine}</span>`}
 const slugify=s=>'/'+String(s).toLowerCase().replace(/\(.*?\)/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 /* The seeds prompt's seeds and what became of each (export_hybrid.research_block). A CE EOS researched has none of ours,
    so its clusters' top keywords stand in. Seeds saved before the research list existed are replaced; ones you added stay. */
@@ -2990,7 +3002,7 @@ document.addEventListener('change',e=>{const t=e.target, d=t.dataset;
     logChange(v==='leave'?`Removed <b>${esc(kw)}</b> from ${esc(nm(byId[cid]))}`:v?`Moved <b>${esc(kw)}</b> from ${esc(nm(byId[cid]))} to ${esc(nm(byId[v]))}`:`Put <b>${esc(kw)}</b> back in ${esc(nm(byId[cid]))}`,()=>{if(was)S.moves[key]=was;else delete S.moves[key]})}
   else if(d.act){act(d.act,t)}
   else if(d.ptype){const c=byId[d.ptype],was=pageTypeOf(c);S.ptype[c.id]=t.value;logChange(`Page type for <b>${esc(nm(c))}</b>: ${esc(was)} → ${esc(t.value)} (content)`,()=>{delete S.ptype[c.id]})}
-  else if(d.pmap){const c=byId[d.pmap],v=t.value;if(!v)return;S.pmap[c.id]=v;logChange(`<b>${esc(nm(c))}</b> is covered by ${esc(v)}`,()=>{delete S.pmap[c.id]})}
+  else if(d.pmap){const c=byId[d.pmap],v=t.value;if(!v)return;if(v==='__none'){S.pmap[c.id]='none';logChange(`No existing page covers <b>${esc(nm(c))}</b>`,()=>{delete S.pmap[c.id]});return}S.pmap[c.id]=v;logChange(`<b>${esc(nm(c))}</b> is covered by ${esc(v)}`,()=>{delete S.pmap[c.id]})}
   else if(d.urlname){const c=byId[d.urlname],was=S.slug[c.id],v=cleanSlug(t.value).slice(1);if(!v){toast('A page name cannot be empty.');render();return}
     if(v===nameOf(c)){render();return}S.slug[c.id]='/'+v;logChange(`Page name for <b>${esc(nm(c))}</b>: ${esc(v)}`,()=>{if(was===undefined)delete S.slug[c.id];else S.slug[c.id]=was})}
   else if(d.urlslug){const c=byId[d.urlslug],had=c.id in S.sep,wasSep=S.sep[c.id],wasSlug=S.slug[c.id],raw=t.value.trim();
