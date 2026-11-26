@@ -1873,7 +1873,12 @@ const TYPE_SLUG={'Landing Page':'','Tours':'{name}','Guided Tours':'guided-tours
   'Dress Code':'dress-code','Tips':'tips','Shopping':'shop','Restaurants':'restaurants','Weather':'weather','Things to Do Nearby':'things-to-do-near-{ce}',
   'Exhibitions & Events':'exhibition-events','Map':'map','Entrance':'entrances','Boarding Points':'boarding-points','Halloween Events':'halloween',
   'Christmas Events':'christmas',"New Year's Eve Events":'new-years-eve','About':'about','History':'history','Architecture':'architecture','Facts':'facts',
-  'Inside / Zones':'what-to-see-inside','Collections':'artwork-collections','Artwork Specific':'{name}','Artist':'{name}','Things to Do':'things-to-do','Custom Page':'{name}'};
+  'Inside / Zones':'what-to-see-inside','Collections':'artwork-collections','Artwork Specific':'{name}','Artist':'{name}','Things to Do':'things-to-do','Custom Page':'{name}',
+  'Sub-Attraction Misc':'{name}','Rides':'rides','Ride Specific':'{name}','Attractions Included (Operator)':'attractions-included','Attractions Included (City)':'attractions-included',
+  'Types of Tickets':'types-of-tickets','Seat Reservation':'seat-reservation','Train Pass by Persona':'{name}','Itinerary (Non-POI)':'itinerary','Timetable':'timetable',
+  'Routes, Maps & Stops':'routes-and-stops','Routes & Stops':'routes-and-stops','1-Day Itinerary (HOHO)':'1-day-itinerary','2-Day Itinerary (HOHO)':'2-day-itinerary',
+  '3-Day Itinerary (HOHO)':'3-day-itinerary','Compare Operators (HOHO)':'compare-operators','Worth It? | Savings':'is-it-worth-it','Comparison':'{name}',
+  'Route Planner':'route-planner','How to Use / Activate':'how-to-use','Compare Operators (City Card)':'compare-city-cards','Animals & Exhibits':'exhibits'};
 const BASE=(String(D.ce.home||'/').replace(/\/+$/,''))+'/';
 const shortPath=p=>{p=String(p||'');return BASE!=='/'&&p.startsWith(BASE)&&p.length>BASE.length?'…/'+p.slice(BASE.length):p};
 const ceSlug=()=>slugify(D.ce.name).slice(1);
@@ -2116,10 +2121,16 @@ const FAM={landing:{coll:'none',poi:'none',subd:true,fetch:'CE ID'},subcat:{coll
    page planning sheet's families. Only the first group are pages that sell; the rest are content-only shoulder pages. */
 const PT_SELL={'Landing Page':'landing','Tours':'subcat','Guided Tours':'subcat','Audio Guide Tours':'subcat','Private Tours':'subcat','Combos':'subcat',
   'Skip-the-Line':'custom','Night Tours':'custom','Branded Collection':'brand','Sub-Attraction A':'subA','Sub-Attraction B':'subB','Sub-Attraction C':'subC',
-  'Non-POI: Area':'child','Non-POI: Sub_experience':'child','Non-POI: A-to-B Day Trip':'child'};
+  'Non-POI: Area':'child','Non-POI: Sub_experience':'child','Non-POI: A-to-B Day Trip':'child',
+  // The rest of page_type.md's canonical values that sell, so every answer the prompt gives is one the tool lists.
+  'Sub-Attraction Misc':'subC','Rides':'custom','Ride Specific':'custom','Attractions Included (Operator)':'brand','Attractions Included (City)':'custom',
+  'Types of Tickets':'landing','Seat Reservation':'custom','Train Pass by Persona':'custom'};
 const PT_INFO=['Plan Your Visit','Timings','Getting There','Parking','Rules & Requirements','Dress Code','Tips','Shopping','Restaurants','Weather',
   'Things to Do Nearby','Exhibitions & Events','Map','Entrance','Boarding Points','Halloween Events','Christmas Events',"New Year's Eve Events",
-  'About','History','Architecture','Facts','Inside / Zones','Collections','Artwork Specific','Artist','Things to Do','Custom Page'];
+  'About','History','Architecture','Facts','Inside / Zones','Collections','Artwork Specific','Artist','Things to Do',
+  'Itinerary (Non-POI)','Timetable','Routes, Maps & Stops','Routes & Stops','1-Day Itinerary (HOHO)','2-Day Itinerary (HOHO)','3-Day Itinerary (HOHO)',
+  'Compare Operators (HOHO)','Worth It? | Savings','Comparison','Route Planner','How to Use / Activate','Compare Operators (City Card)',
+  'Animals & Exhibits','Custom Page'];
 const ENT=Object.fromEntries([...Object.entries(PT_SELL).map(([t,f])=>[t,FAM[f]]),...PT_INFO.map(t=>[t,t==='Custom Page'?FAM.custom:FAM.info])]);
 const PAGE_TYPES=Object.keys(ENT);
 /* Page type and page URL (Krupa, 19 Nov): filled in, read like text, edited only when someone clicks. The URL is the
@@ -2281,9 +2292,13 @@ function routeType(c){
    become Custom Pages. Explicit ticket wording outranks volume for the Landing Page. */
 const PT_REPEAT=/^Sub-Attraction|^Non-POI|^Artwork Specific$|^Custom Page$|^Branded Collection$/;
 let PT_CACHE=null;
-function pageTypes(){if(PT_CACHE)return PT_CACHE;const L=C.filter(c=>!OTHER(c)),raw=Object.fromEntries(L.map(c=>[c.id,c.page_ai?.page_type&&ENT[c.page_ai.page_type]?c.page_ai.page_type:!c.pages.length&&c.checks?.operator?'Branded Collection':routeType(c)])),out={...raw};
+/* Page type is the page_type prompt's (page_decisions.py), for every cluster. The tool's own routing fills in only where
+   the prompt gave no answer or a type the tool does not list, and only those are de-duplicated: the prompt applies its
+   own uniqueness rules (one Landing Page per CE). */
+const aiType=c=>c.page_ai?.page_type&&ENT[c.page_ai.page_type]?c.page_ai.page_type:null;
+function pageTypes(){if(PT_CACHE)return PT_CACHE;const L=C.filter(c=>!OTHER(c)),raw=Object.fromEntries(L.map(c=>[c.id,aiType(c)||(!c.pages.length&&c.checks?.operator?'Branded Collection':routeType(c))])),out={...raw};
   const strength=c=>(c.vol||0)*(raw[c.id]==='Landing Page'&&RX((nm(c)+' '+(focusLabel(c)||'')).toLowerCase(),/ticket|entry|admission|head term/)?10:1);
-  const by={};L.forEach(c=>{if(!PT_REPEAT.test(raw[c.id]))(by[raw[c.id]]=by[raw[c.id]]||[]).push(c)});
+  const by={};L.forEach(c=>{if(!aiType(c)&&!PT_REPEAT.test(raw[c.id]))(by[raw[c.id]]=by[raw[c.id]]||[]).push(c)});
   Object.values(by).forEach(G=>G.sort((a,b)=>strength(b)-strength(a)).slice(1).forEach(c=>{out[c.id]='Custom Page'}));
   return PT_CACHE=out}
 const pageTypeOf=c=>S.ptype[c.id]||pageTypes()[c.id]||'Custom Page';

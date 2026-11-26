@@ -5,7 +5,8 @@
 1. page_mapping.md: does an existing page of the CE already cover each cluster (existing_page / no_existing_page /
    needs_review)?
 2. separate_page.md: for the clusters no existing page covers, does each need a page of its own (yes / no / not_sure)?
-3. page_type.md: for the clusters that get a page of their own, which page type, with every cluster of the CE as context.
+3. page_type.md: the page type of every cluster, each marked needs_page_type, so the tool shows the prompt's routing for
+   all of them and never its own rules.
 
 Inputs come from the CE's tool folder: the exported clusters (type, focus keyword, keywords, supply), its Payload pages
 (pages_<CE>.csv), its products and their operators (the proposed assortment) and page_facts.json (category). The prompt
@@ -128,11 +129,12 @@ def main():
     sep = run("separate_page", "separate_page.md",
               {**ce, "clusters_data.text": json.dumps([cluster_data(c) for c in open_], ensure_ascii=False)}, "decisions") if open_ else []
     sep_of = {s.get("cluster_name"): s.get("separate_page") for s in sep}
-    # 3. Page type for the ones that get a page, every cluster passed as context.
+    # 3. Page type for every cluster: the page type shown anywhere in the tool is the prompt's. The prompt routes only
+    # the clusters marked needs_page_type, so all of them are.
     need = {c["name"] for c in open_ if sep_of.get(c["name"]) == "yes"}
     types = run("page_type", "page_type.md",
-                {**ce, "clusters_data.text": json.dumps([cluster_data(c, {"needs_page_type": c["name"] in need}) for c in clusters], ensure_ascii=False)},
-                "page_types") if need else []
+                {**ce, "clusters_data.text": json.dumps([cluster_data(c, {"needs_page_type": True}) for c in clusters], ensure_ascii=False)},
+                "page_types") if clusters else []
     type_of = {t.get("cluster_name"): t.get("page_type") for t in types}
 
     result = {}
