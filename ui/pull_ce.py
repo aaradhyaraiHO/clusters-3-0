@@ -24,10 +24,11 @@ NEEDS_PRODUCTS = {"experience_variants", "variant_availability", "variant_orders
 
 
 def gcloud_config():
-    tmp = Path(os.environ.get("TMPDIR", "/tmp")) / "gcloud_pull_ce"
-    if not (tmp / "credentials.db").exists():
-        # gcloud's own virtenv holds dangling symlinks; the credentials do not need it.
-        shutil.copytree(Path.home() / ".config" / "gcloud", tmp, ignore=shutil.ignore_patterns("virtenv"), dirs_exist_ok=True)
+    # Copied fresh every run: a copy kept from before a `gcloud auth login` holds the expired token.
+    tmp = Path(os.environ.get("TMPDIR", "/tmp")) / f"gcloud_pull_ce_{os.getpid()}"
+    shutil.rmtree(tmp, ignore_errors=True)
+    # gcloud's own virtenv holds dangling symlinks; the credentials do not need it.
+    shutil.copytree(Path.home() / ".config" / "gcloud", tmp, ignore=shutil.ignore_patterns("virtenv", "logs"), dirs_exist_ok=True)
     return str(tmp)
 
 
