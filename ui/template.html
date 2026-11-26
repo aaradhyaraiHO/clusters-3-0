@@ -289,6 +289,7 @@ details .in{padding:0 12px 10px}
 .tiles>div{background:var(--panel);border-radius:8px;padding:8px 10px;min-width:0}
 .tiles b{display:block;font-size:var(--t-title);line-height:24px;font-weight:600;font-variant-numeric:tabular-nums}
 .drawer.seeds{width:min(480px,100%)}
+.chip.seed.off{opacity:.5;text-decoration:line-through;text-decoration-color:var(--muted,#999)}
 .editbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;margin:0 0 8px;border:1px solid var(--accent);border-radius:8px;background:var(--panel)}
 .editbar .warn{color:var(--warn)}
 .pick{margin:3px 2px 0 0;accent-color:var(--accent);width:16px;height:16px;flex:none}
@@ -398,7 +399,8 @@ input[type="checkbox"]:focus-visible{outline:2px solid var(--accent);outline-off
 .ptab{table-layout:fixed}
 .isel.set{color:var(--accent-ink);border-color:var(--accent)}
 .ptab td{vertical-align:middle}
-.ptab .pname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Vendor names run long ("phuket new generation travel (pnt phuket)"): they wrap rather than being cut off. */
+.ptab .pname{white-space:normal;overflow-wrap:anywhere;line-height:1.3}
 .ptab .isel{width:100%;max-width:none}
 .ptab .x{font-size:16px}
 .spark{color:var(--accent);vertical-align:middle}
@@ -2090,7 +2092,12 @@ function urlCell(c){if(OTHER(c))return '<span class="dim">–</span>';
   const taken=slugTaken(c);
   return `<span class="cell"><input class="plainin${taken?' bad':''}" data-urlslug="${c.id}" value="${esc(slugOf(c))}" aria-label="Page URL for ${esc(nm(c))}" title="Suggested from its focus keyword. Click to edit; clear it for no page">${taken?`<span class="s warn">already used by ${esc(taken)}</span>`:''}${subLine}</span>`}
 const slugify=s=>'/'+String(s).toLowerCase().replace(/\(.*?\)/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+/* The seeds prompt's seeds and what became of each (export_hybrid.research_block). A CE EOS researched has none of ours,
+   so its clusters' top keywords stand in. Seeds saved before the research list existed are replaced; ones you added stay. */
+const RS=D.research||{seeds:[],vendors:[],source:'eos'};
+const SEEDCAT={'Sub-attractions':'Sub-attraction'};
 function seedList(){
+  if(RS.seeds.length&&!(S.seeds||[]).some(x=>x.src))S.seeds=[...(S.seeds||[]).filter(x=>x.mine),...RS.seeds.slice().sort((a,b)=>(b.vol||0)-(a.vol||0)).map(x=>({kw:x.kw,vol:x.vol,kind:SEEDCAT[x.category]||x.category||'Other',cid:x.cid,status:x.status,src:'research',mine:false}))];
   if(!S.seeds)S.seeds=C.filter(c=>!OTHER(c)&&c.focus_kw).sort((a,b)=>(b.vol||0)-(a.vol||0)).map(c=>({kw:c.focus_kw,vol:c.vol,kind:TYPE[c.type],cid:c.id,mine:false}));
   return S.seeds;
 }
@@ -2102,6 +2109,7 @@ const OTA=['get your guide','getyourguide','tiqets','viator','klook','musement',
   S.leave=[];S.leaveSug=new Set(found)})();
 /* The CE's supply partners. No vendor list or brand volumes are in this snapshot, so stand-in rows show the flow. */
 function partnerList(){
+  if(RS.vendors.length&&!(S.partners||[]).some(x=>x.src))S.partners=[...RS.vendors.slice().sort((a,b)=>(b.vol||0)-(a.vol||0)).map(v=>({name:v.name,vol:v.vol,live:v.live,real:'yes',cid:v.cid,source:v.source,src:'research'})),...(S.partners||[]).filter(x=>!x.stand&&!x.src)];
   if(!S.partners)S.partners=[{name:'Partner A tours',vol:2400,live:6,real:'yes'},{name:'Partner B city passes',vol:1300,live:2,real:'yes'},{name:'Partner C',vol:90,live:1,real:'no'}].map(x=>({...x,stand:true}));
   return S.partners;
 }
@@ -2114,7 +2122,7 @@ function partnersTab(){
   return `<p class="s" style="margin:0">Partners people search for by name get their own cluster. <span class="tip" title="Cluster it: people search this name for this experience. Not real: nobody does, or the name means something else. Partner clusters come back as their own group, start unticked for Perf (bidding on a partner's name may need their OK), and can get a Vendor page from Content.">i</span>${stand?' <span class="dim">Rows marked * are stand-ins until the vendor list is exported.</span>':''}</p>
     <table class="dt ptab"><colgroup><col style="width:36%"><col style="width:17%"><col style="width:10%"><col style="width:30%"><col style="width:7%"></colgroup>
      <thead><tr><th>Partner</th><th class="num">Searches</th><th class="num">Live</th><th>Cluster?</th><th></th></tr></thead><tbody>
-     ${L.map((x,i)=>`<tr><td class="pname" title="${esc(x.name)}">${esc(x.name)}${x.stand?'<span class="dim">*</span>':''}</td><td class="num">${x.vol==null?'<span class="dim" title="Known after re-run">–</span>':n(x.vol)}</td><td class="num">${x.live==null?'<span class="dim">–</span>':n(x.live)}</td><td><select class="isel" data-partner="${i}" aria-label="Cluster ${esc(x.name)}"><option value="yes" ${x.real==='yes'?'selected':''}>Cluster it</option><option value="no" ${x.real==='no'?'selected':''}>Not real</option></select></td><td><button class="x" data-partnerdel="${i}" aria-label="Remove ${esc(x.name)}">×</button></td></tr>`).join('')}</tbody></table>
+     ${L.map((x,i)=>`<tr><td class="pname" title="${esc(x.name)}">${esc(x.name)}${x.stand?'<span class="dim">*</span>':''}${x.src?`<div class="s dim">${esc(x.source)}${x.cid&&byId[x.cid]?` · <button class="lnk" data-row="${x.cid}">${esc(nm(byId[x.cid]))}</button>`:''}</div>`:''}</td><td class="num">${x.vol==null?`<span class="dim" title="${x.src?'Not searched in Keyword Planner (EOS researched this CE)':'Known after re-run'}">–</span>`:n(x.vol)}</td><td class="num">${x.live==null?'<span class="dim">–</span>':n(x.live)}</td><td><select class="isel" data-partner="${i}" aria-label="Cluster ${esc(x.name)}"><option value="yes" ${x.real==='yes'?'selected':''}>Cluster it</option><option value="no" ${x.real==='no'?'selected':''}>Not real</option></select></td><td><button class="x" data-partnerdel="${i}" aria-label="Remove ${esc(x.name)}">×</button></td></tr>`).join('')}</tbody></table>
     <div class="addrow"><input id="partnerin" placeholder="Partner or operator name" aria-label="New partner"><button class="btn" data-partneradd>Add</button></div>`;
 }
 function seedsLayer(){
@@ -2122,11 +2130,11 @@ function seedsLayer(){
   return `<div class="scrim" data-close></div><aside class="drawer seeds" role="dialog" aria-label="Seed keywords">
    <header><div><div class="s">Keyword research</div><h2>Seeds</h2></div><button class="x" data-close aria-label="Close">×</button></header>
    <div class="dbody"><nav class="dtabs" role="tablist"><button role="tab" data-stab="kw" aria-selected="${S.stab==='kw'}">Keywords<i>${n(L.length)}</i></button><button role="tab" data-stab="nocl" aria-selected="${S.stab==='nocl'}">No cluster yet<i>${n(OPPS_().filter(o=>['unclaimed','unclustered'].includes(o.type)&&!oppState(o)).length)}</i></button><button role="tab" data-stab="partners" aria-selected="${S.stab==='partners'}">Supply partners<i>${n(partnerList().length)}</i></button></nav>
-    ${S.stab==='nocl'?noClusterTab():S.stab==='partners'?partnersTab():`<p class="s" style="margin:0">What the keyword research starts from. Add or remove, then re-run: your cluster edits and page decisions are kept. <span class="dim">Stand-in: no seed list in this snapshot, so each cluster's top keyword is shown with the cluster it led to.</span></p>
+    ${S.stab==='nocl'?noClusterTab():S.stab==='partners'?partnersTab():`<p class="s" style="margin:0">What the keyword research starts from. Add or remove, then re-run: your cluster edits and page decisions are kept. ${RS.seeds.length?`<span class="dim">From the seeds prompt and Keyword Planner: ${(()=>{const c={};RS.seeds.forEach(x=>{c[x.status]=(c[x.status]||0)+1});return Object.entries(c).sort((a,b)=>b[1]-a[1]).map(([s,v])=>`${n(v)} ${esc(s)}`).join(' · ')})()}. Greyed seeds did not reach clustering.</span>`:'<span class="dim">EOS researched this CE, so its seed list is not in the tool: each cluster\'s top keyword is shown with the cluster it led to.</span>'}</p>
     <div class="addrow"><input id="seedin" placeholder="Type a search to add as a seed" aria-label="New seed keyword"><button class="btn" data-seedadd>Add seed</button></div><span class="s err" id="seederr"></span>
-    ${(()=>{const bucket=x=>x.mine?'Added by you':x.cid&&byId[x.cid]?.entity?.items?.some(e=>e.type==='poi')?'Sub-attraction':x.cid&&byId[x.cid]?TYPE[typeOf(byId[x.cid])]:x.kind||'Other';
+    ${(()=>{const bucket=x=>x.mine?'Added by you':x.src?x.kind:x.cid&&byId[x.cid]?.entity?.items?.some(e=>e.type==='poi')?'Sub-attraction':x.cid&&byId[x.cid]?TYPE[typeOf(byId[x.cid])]:x.kind||'Other';
       const order=['Transactional','Sub-attraction','Planning','Informational','Added by you','Other'],G={};L.forEach((x,i)=>{(G[bucket(x)]=G[bucket(x)]||[]).push([x,i])});
-      return order.filter(b=>G[b]).map(b=>`<div class="seedgrp"><div class="s"><b>${b}</b> · ${n(G[b].length)}</div><div class="chips">${G[b].map(([x,i])=>`<span class="chip seed" title="${x.mine?'Searches known after re-run':`${n(x.vol)} searches / mo${x.cid&&byId[x.cid]?` · led to ${esc(nm(byId[x.cid]))}`:''}`}">${x.cid&&byId[x.cid]&&live().includes(byId[x.cid])?`<button class="lnk" data-row="${x.cid}">${esc(x.kw)}</button>`:esc(x.kw)}${x.mine?'':` <i>${k(x.vol)}</i>`}<button class="x sm" data-seeddel="${i}" aria-label="Remove ${esc(x.kw)}">×</button></span>`).join('')}</div></div>`).join('')})()}
+      return order.filter(b=>G[b]).map(b=>`<div class="seedgrp"><div class="s"><b>${b}</b> · ${n(G[b].length)}</div><div class="chips">${G[b].map(([x,i])=>`<span class="chip seed${x.src&&x.status!=='kept'&&x.status!=='kept, no searches'?' off':''}" title="${x.mine?'Searches known after re-run':`${x.vol==null?'No Keyword Planner volume':`${n(x.vol)} searches / mo`}${x.status?` · ${esc(x.status)}`:''}${x.cid&&byId[x.cid]?` · led to ${esc(nm(byId[x.cid]))}`:''}`}">${x.cid&&byId[x.cid]&&live().includes(byId[x.cid])?`<button class="lnk" data-row="${x.cid}">${esc(x.kw)}</button>`:esc(x.kw)}${x.mine?'':` <i>${x.vol==null?'–':k(x.vol)}</i>`}<button class="x sm" data-seeddel="${i}" aria-label="Remove ${esc(x.kw)}">×</button></span>`).join('')}</div></div>`).join('')})()}
     <h4 class="sh">Leave out</h4><p class="s" style="margin:0">Keywords containing these never enter clustering, e.g. OTA names. A list every CE leaves out is set by admins and applies too.</p>
     <div class="addrow"><input id="leavein" placeholder="viator" aria-label="Word to leave out"><button class="btn" data-leaveadd>Add to leave out</button></div>
     <div class="tags">${S.leave.map((w,i)=>`<span class="pill line">${esc(w)} <button class="x" style="font-size:12px" data-leavedel="${i}" aria-label="Stop leaving out ${esc(w)}">×</button></span>`).join('')||'<span class="dim s">None confirmed for this CE yet.</span>'}</div>

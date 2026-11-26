@@ -1508,7 +1508,58 @@ ce.update({"search_terms_shown": r(st_shown, 3), "weeks": [str(w) for w in weeks
                          **({"operator": True} if x.operator else {})} for x in ents.itertuples()]})
 if len(ents):
     ce["banner"] = ce.get("banner", "").replace(", Headout entities.", ".")
-data = {"ce": ce, "clusters": clusters, "page_shows": shows, "pages_no_cluster": [{"path": x.url, "type": x.page_sub_type, "focus": x.text, "revenue": r(x.revenue, 2),
+# Keyword research for the tool's Seeds drawer: the seeds prompt's seeds with what became of each, and the CE's vendors.
+# A CE EOS researched has no seed list of ours (its keywords came from EOS), so only its vendors show.
+_rsnap = ROOT / "snapshots" / f"ce_{CE if CE == 189 else CFG.get('eos_id') or CE}"
+_num = lambda f: int(f.stem.split("_")[-1])
+
+
+def planner_volumes(paths):
+    """Keyword Planner's downloaded ideas (UTF-16, tab-separated, two title lines): keyword -> avg monthly searches."""
+    found = {}
+    for path in paths:
+        df = pd.read_csv(path, sep="\t", encoding="utf-16", skiprows=2)
+        vol = pd.to_numeric(df["Avg. monthly searches"].astype(str).str.replace(",", ""), errors="coerce").fillna(0)
+        for t, v in zip(df["Keyword"].astype(str).str.strip().str.lower(), vol):
+            found[t] = max(found.get(t, 0), int(v))
+    return found
+
+
+def research_block():
+    files = sorted(_rsnap.glob("planner_ideas_*.csv"), key=_num)
+    # Files 1-8 are the seeds' searches, 9 onward the vendor seeds' (full_ce.sh).
+    seed_vol, vendor_vol = planner_volumes([f for f in files if _num(f) <= 8]), planner_volumes([f for f in files if _num(f) >= 9])
+    kept = set(pd.read_csv(_rsnap / "eos_keywords.csv")["term"].map(norm)) if (_rsnap / "eos_keywords.csv").exists() else set()
+    kw_cid = dict(zip(kw["k"], kw["cid"]))
+    cid_of = lambda t: (lambda c: c if c in names.index else None)(kw_cid.get(norm(t)))
+    seeds = []
+    if (_rsnap / "seeds.json").exists() and files:
+        for x in json.loads((_rsnap / "seeds.json").read_text()):
+            t, v = x["keyword"], seed_vol.get(x["keyword"])
+            status = ("kept" if norm(t) in kept and v else "kept, no searches" if norm(t) in kept
+                      else "not returned by Keyword Planner" if v is None else "no searches" if v == 0 else "cut by the 1,000 cap")
+            seeds.append({"kw": t, "category": x.get("category"), "vol": v, "status": status, "cid": cid_of(t)})
+    vendors = []
+    if (_rsnap / "vendor_seeds.json").exists():
+        vj = json.loads((_rsnap / "vendor_seeds.json").read_text())
+        internal = [squash(i["name"]) for i in vj.get("internal", [])]
+        # Vendor lists written before research_ce.searchable() still carry legal suffixes; clean them the same way.
+        clean = lambda t: re.sub(r"[\s,]*\b(co\.?,?\s*ltd\.?|pty\.?\s*ltd\.?|pte\.?\s*ltd\.?|ltd\.?|limited|inc\.?|llc|co\.?|corporation|corp\.?)\s*$", "",
+                                 re.split(r"\btrading as\b|\bt/as?\b", t, flags=re.I)[-1], flags=re.I).strip(" -,.").lower()
+        for name in dict.fromkeys(clean(clean(x["keyword"])) for x in vj["vendors"]):
+            sq = squash(name)
+            if not sq:
+                continue
+            own = [c for c in names.index if any(_stemw(names.at[c, "name"])[i:i + len(ph)] == ph
+                                                 for ph in [_stemw(name)] for i in range(len(_stemw(names.at[c, "name"])) - len(ph) + 1))]
+            exps = xp[[bool(sq) and sq in squash(v) for v in xp["vendors"].fillna("")]]
+            vendors.append({"name": name, "source": "Headout vendor" if any(sq and (sq in i or i in sq) for i in internal) else "web",
+                            "vol": vendor_vol.get(name) if vendor_vol else None, "live": int(exps["live"].sum()) if len(exps) else 0,
+                            "cid": own[0] if own else cid_of(name)})
+    return {"source": "ours" if seeds else "eos", "seeds": seeds, "vendors": vendors}
+
+
+data = {"research": research_block(), "ce": ce, "clusters": clusters, "page_shows": shows, "pages_no_cluster": [{"path": x.url, "type": x.page_sub_type, "focus": x.text, "revenue": r(x.revenue, 2),
                                                                                     "why": None if pd.isna(x.why_no_cluster) else x.why_no_cluster,
                                                                                     "tag": None if pd.isna(x.tag) else x.tag}
                              for x in hpages[hpages["cid"].isna()].sort_values("revenue", ascending=False).itertuples()],
