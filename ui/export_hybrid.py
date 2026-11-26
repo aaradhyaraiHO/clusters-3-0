@@ -902,11 +902,7 @@ BUY_RE = re.compile(r"\b(tickets?|tours?|cruises?|book(ing|ings)?|reserv\w*|pric
 # vendor_seeds and vendor_noise_filter prompts). A cluster named after one ("Whale Dreamer Sydney") is a booking search
 # even when Headout sells nothing from that operator.
 _vendor_file = ROOT / "snapshots" / f"ce_{CE if CE == 189 else CFG.get('eos_id') or CE}" / "vendor_seeds.json"
-VENDORS = [v["keyword"] for v in json.loads(_vendor_file.read_text())["vendors"]] if _vendor_file.exists() else []
-_vendor_words = [w for w in (set(re.split(r"[^a-z0-9]+", fold(v))) - {"", "the", "and", "tours", "tour", "cruises", "cruise", "co"}
-                             for v in VENDORS) if w]
-
-
+CE_VENDORS = [v["keyword"] for v in json.loads(_vendor_file.read_text())["vendors"]] if _vendor_file.exists() else []
 # Only a sight moves: a cluster named after a place feature ("Bowen Falls", "Heart Reef", "Phi Phi Viewpoint"). A name
 # that is neither a sight nor bookable is more often an operator Headout does not list ("Whale Dreamer Sydney", "Cougar
 # Line"), which stays Transactional; a route ("Railay Beach to Phi Phi Island") is a transfer to book.
@@ -916,11 +912,18 @@ SIGHT_RE = re.compile(r"\b(falls?|waterfalls?|beach(es)?|bay|reef|island|islet|v
                       r"pier|wharf|harbou?r|sound|fjord|glacier|forest|rainforest|swamp|springs?|rock|cliffs?)\b")
 ROUTE_RE = re.compile(r"\b(to|from)\b")
 _ce_name_words = {w for w in re.split(r"[^a-z0-9]+", fold(CE_NAME)) if w} | {re.sub(r"s$", "", w) for w in re.split(r"[^a-z0-9]+", fold(CE_NAME)) if w}
+_stemw = lambda t: [re.sub(r"s$", "", w) if len(w) > 3 else w for w in re.split(r"[^a-z0-9]+", fold(re.sub(r"'", "", t))) if w]
+# A vendor name made only of the CE's name and generic words ("daintree tours", "milford sound cruises") names no
+# operator a cluster could be about.
+_VENDOR_GENERIC = {"the", "and", "tour", "cruise", "co", "travel", "trip", "group", "company", "holiday", "experience", "adventure"}
+_vendor_phrases = [ph for ph in (_stemw(v) for v in CE_VENDORS)
+                   if ph and set(ph) - _VENDOR_GENERIC - {re.sub(r"s$", "", w) for w in _ce_name_words}]
 
 
 def names_vendor(name):
-    nw = set(re.split(r"[^a-z0-9]+", fold(name)))
-    return any(w <= nw for w in _vendor_words)
+    """The cluster's name holds a vendor's name as a phrase: "Cougar Line Picton", "Maverick Helicopter Tours"."""
+    nw = _stemw(name)
+    return any(any(nw[i:i + len(ph)] == ph for i in range(len(nw) - len(ph) + 1)) for ph in _vendor_phrases)
 
 
 def pick_focus(top_kw, name, head):
