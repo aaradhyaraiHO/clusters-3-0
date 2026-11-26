@@ -38,6 +38,12 @@ def render(name, ce, cfg, collections="", experiences=""):
     for token, value in {"__NAME__": cfg["name"], "__HOST__": host, "__SITE_RE__": site.replace(".", r"\."), "__SITE__": site,
                          "__COLLECTIONS__": collections, "__EXPERIENCES__": experiences, "__CE__": ce}.items():
         sql = sql.replace(token, value)
+    # A CE whose pages also sit on another site (Park Güell under barcelona-tickets.com/park-guell) lists those uid
+    # prefixes in ces.json page_prefixes; Payload pages are read from its own host and from each of them.
+    prefixes = cfg.get("page_prefixes") or []
+    if prefixes:
+        sql = sql.replace(f"STARTS_WITH(uid, '{host}')",
+                          "(" + " OR ".join(f"STARTS_WITH(uid, '{h}')" for h in [host, *prefixes]) + ")")
     left = re.findall(r"__[A-Z_]+__", sql)
     if left:
         raise SystemExit(f"{name}: unfilled {sorted(set(left))}")

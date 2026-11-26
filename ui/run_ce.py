@@ -26,7 +26,8 @@ HERE = Path(__file__).resolve().parent
 ROOT = Path.home() / "analytics" / ".claude" / "worktrees" / "clusters-3-0" / "scripts" / "clusters_3_0"
 VENV = ROOT / ".env-clusters" / "venv" / "bin" / "python"
 SOURCE = ROOT / "snapshots" / "20261030_validation_v1"
-STEPS = ["pull", "map", "prepare", "group", "facts", "export", "build"]
+# pages runs the prompts doc's page prompts on the exported clusters; relink exports again with their answers.
+STEPS = ["pull", "map", "prepare", "group", "facts", "export", "pages", "relink", "build"]
 NO_SITE = "www.no-microbrand.invalid"
 
 
@@ -146,6 +147,8 @@ def main():
         "group": [venv, "group_unclustered.py", root, key],
         "facts": [py, "facts_ce.py", key],
         "export": [venv, "export_hybrid.py", root, key],
+        "pages": [venv, "page_decisions.py", root, key],
+        "relink": [venv, "export_hybrid.py", root, key],
         "build": [py, "build.py", cfg["slug"]],
     }
     for step in STEPS[STEPS.index(a.start):]:
@@ -154,6 +157,10 @@ def main():
             continue
         print(f"== {step}: {' '.join(Path(x).name if i == 0 else x for i, x in enumerate(commands[step]))}", flush=True)
         if subprocess.run(commands[step], cwd=HERE).returncode:
+            if step == "pages":
+                # The page still builds without the prompts' answers; the tool then falls back to its own rules.
+                print("pages: the page prompts failed; building on the tool's own rules. Rerun with --from pages.")
+                continue
             raise SystemExit(f"stopped at {step}; fix it and rerun with --from {step}")
     print(f"done: {cfg['page']}")
 

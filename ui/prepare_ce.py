@@ -34,7 +34,9 @@ strip = lambda t: " ".join(w for w in str(t).lower().replace("-", " ").split() i
 kw = pd.read_csv(SNAP / "cluster_keywords.csv")
 pages = pd.read_csv(OUT / f"pages_{CE}.csv", dtype={"collection_id": str})
 pages = pages[pages["status_en"] == "published"].copy()
-pages["path"] = pages["uid"].str.replace(HOST, "", regex=False).str.replace(".", "/", regex=False).str.strip("/")
+# A page's host: the CE's own, or another site that holds a section for it (ces.json page_prefixes).
+pages["host"] = pages["uid"].str.extract(r"^(www\.[a-z0-9-]+\.(?:co\.[a-z]{2}|com\.[a-z]{2}|[a-z]{2,3}))(?=\.|$)")[0].fillna(HOST)
+pages["path"] = [u[len(h):].replace(".", "/").strip("/") for u, h in zip(pages["uid"], pages["host"])]
 model = SentenceTransformer(str(MODEL))
 kw_text = kw["kw"].map(strip)
 kw_emb = model.encode(kw_text.tolist(), normalize_embeddings=True, batch_size=64)

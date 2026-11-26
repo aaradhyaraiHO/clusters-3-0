@@ -125,7 +125,7 @@ old_by_name = {c["name"].lower(): c for c in old.values()}
 # Trust pages (about us, legal) carry no search intent; the page mapper still matches their focus keyword to something.
 hpages = pd.read_csv(PAGES, dtype={"collection_id": str})
 hpages = hpages[hpages["page_type"] != "Trust"].assign(path=lambda d: d["path"].fillna(""))
-hpages["url"] = HOST + "/" + hpages["path"]
+hpages["url"] = (hpages["host"] if "host" in hpages else HOST) + "/" + hpages["path"]
 # Organic orders by the page they landed on. A Payload page serves every locale, so /de/sistine-chapel counts for
 # sistine-chapel; orders landing on headout.com rather than the microbrand map to no page and stay at CE level.
 landed_all = pd.read_csv(V4 / "orders_by_landing.csv" if CE == 189 else OUT / f"orders_by_landing_{CE}.csv").rename(
@@ -484,6 +484,19 @@ hpages["text_cid"] = before
 moved = (hpages["cid"].fillna("") != before.fillna(""))
 print(f"pages: {int(hpages['tag'].notna().sum())} tagged; {int(moved.sum())} moved from the text mapping "
       f"({int((moved & hpages['cid'].isna()).sum())} to no cluster)")
+# The prompts doc's page prompts (page_decisions.py, run after the first export): page_mapping's match links a page no
+# rule above placed to its cluster; the own-page and page-type answers go to the tool as its suggestions.
+PAGE_AI = json.loads((OUT / "page_decisions.json").read_text())["clusters"] if (OUT / "page_decisions.json").exists() else {}
+_page_key = lambda u: re.sub(r"^https?://", "", str(u)).strip("/")
+_by_url = {_page_key(u): i for i, u in zip(hpages.index, hpages["url"])}
+_linked = 0
+for _cid, _d in PAGE_AI.items():
+    _i = _by_url.get(_page_key(_d.get("existing_page_url") or ""))
+    if _d.get("mapping") == "existing_page" and _i is not None and pd.isna(hpages.at[_i, "cid"]) and _cid in names.index:
+        hpages.at[_i, "cid"], hpages.at[_i, "how"] = _cid, "page_mapping prompt"
+        _linked += 1
+if PAGE_AI:
+    print(f"page prompts: {_linked} pages linked by page_mapping; answers for {len(PAGE_AI)} clusters")
 
 # A cluster's entity items: the tags on its own pages first (the slot's first source), then what its name or keywords
 # name. Each item says where it came from.
@@ -1042,6 +1055,7 @@ for cid, meta in names.iterrows():
                   "mix": cv("Themes (share of cluster clicks)")},
         "page_revenue": (src or {}).get("page_revenue"), "pct_ce_revenue": (src or {}).get("pct_ce_revenue"),
         "pages": (src or {}).get("pages", []),
+        "page_ai": PAGE_AI.get(cid),
         "organic_orders": (src or {}).get("organic_orders"), "organic_revenue": (src or {}).get("organic_revenue"),
         "supply": (src or {}).get("supply") or {"n": 0, "live": 0, "revenue": 0, "experiences": []},
         "entity": (src or {}).get("entity") or {"status": "CE collection", "items": []},
@@ -1382,7 +1396,7 @@ def searched_products(cl):
 
 # The CE's home is its Payload "Theme" page: the bare host on most sites, /home on Park Güell's.
 _pg_all = pd.read_csv(HERE / "hybrid" / "pages_189.csv" if CE == 189 else OUT / f"pages_{CE}.csv", usecols=["uid", "page_type"])
-_theme = _pg_all.loc[_pg_all["page_type"] == "Theme", "uid"]
+_theme = _pg_all.loc[(_pg_all["page_type"] == "Theme") & _pg_all["uid"].str.startswith(HOST), "uid"]
 HOME_PATH = "/" + "/".join(_theme.iloc[0].split(".")[len(HOST.split(".")):]) if len(_theme) else "/"
 
 
