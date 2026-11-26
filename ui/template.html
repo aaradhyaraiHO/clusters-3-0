@@ -1083,7 +1083,7 @@ const G={
  roi:['Paid ROI','Google Ads conversion value ÷ spend. Under 100% loses money; 140% is the target.','Google Ads'],
  ptype:['Page type','The page type from the cluster-to-page mapping prompt. It decides the entities and whether content reviews the page. Click to change; content checks it here before launch.','Page mapping'],
  url:['Page','The cluster’s page. Live: an existing page (matched by the page_mapping prompt, or picked). Planned: the URL its page type gets under the MB URL guidelines, only the name part editable. Needs review: the page_mapping prompt was not sure an existing page covers it. The subdomain sits under it.','Payload, page prompts, MB URL guidelines'],
- page:['Ads land on','The page the cluster\'s own ad group sends paid clicks to (the ad\'s final URL), and whether that is the cluster\'s page.','Google Ads ads (BigQuery)'],
+ page:['Ads land on','Where the cluster\'s paid clicks land, estimated: the landing pages of the ad groups that served its searches, each weighted by its share of that ad group\'s clicks. Warns when a buying cluster with 20+ clicks has its own page but under half its clicks land there.','Google Ads landing pages and search terms (BigQuery)'],
  status:['Current status','What is wrong with the cluster, first rule that applies: Supply thin (no unique experience on sale), Not set up (own page chosen, no page yet), No traffic (under 100 paid clicks or coverage below its bar), Underperforming (ROI more than 5 points under its campaigns\' target, or under 100%), Working. Content clusters: page live or not.','Supply, pages, Google Ads'],
  lnch:['Launch','One Launch takes the cluster all the way: supply (growth or the BDM add an experience), the page (set up now when content need not review its page type, otherwise in the CE\'s Send to content), and its Perf ask, sent to Perf\'s tool once the page is live. After it, the cell says who the cluster waits on. Hold keeps a cluster out.','Your call'],
  setup:['Set-up','The launch steps: page type, Headout entity (collection, POI), MB page, experiences on sale, own ad group.','Payload, Headout entities, Google Ads'],
@@ -1214,13 +1214,14 @@ function mainPage(c){
 /* Landing share is estimated from the final URLs of the ad groups serving the cluster: landing pages are set per ad
    group. A warning needs the cluster to own a page, 100+ paid clicks and most of them landing elsewhere. */
 function pageCell(c){
-  // Paid landing = the final URL of the cluster's core ad group (see ownCell); one source, no estimate.
-  const L=c.adg?.landing;if(!HASPAID||!c.adg?.ag||!L)return `<span class="cell"><span class="dim">No own ad group</span></span>`;
-  const mp=mainPage(c)||(S.pmap[c.id]&&S.pmap[c.id]!=='none'?{path:S.pmap[c.id]}:null), home=isHome(L.path);
-  const mine=mp&&((mp.home||pathOf(mp)==='/')?home:normPath(pathOf(mp))===normPath(L.path));
-  const sub=mp?(mine?'<span class="s ok">Its page</span>':`<span class="s warn">Not its page (${esc(mp.home?'/':pathOf(mp))})</span>`)
-    :sepOf(c)==='yes'?`<span class="s">Moves to ${esc(slugOf(c))} once that page is live</span>`:'';
-  return `<span class="cell">${urlBtn(home?'/':L.path,home?'/ (home)':esc(L.path))}${sub}</span>`;
+  if(!HASPAID)return '<span class="dim">–</span>';
+  const L=landOf(c);if(!L||!(c.clicks||0))return `<span class="cell"><span class="dim">No paid clicks</span></span>`;
+  const host=L.host&&L.host!==ROOT_DOMAIN?'www.'+L.host:HOST, label=isHome(L.path)?'/ (home)':esc(L.path);
+  const head=`<span title="Estimated: the landing pages of the ad groups that served its searches, weighted by its share of each">${urlBtn(isHome(L.path)?'/':L.path,label,host)} <span class="s">${pct(L.share)} of its clicks</span></span>`;
+  let sub='';
+  if(L.own)sub=L.onOwn>=0.5?'<span class="s ok">Its page</span>':landsOff(c)?`<span class="s warn">Its page is ${esc(L.own)}: ${pct(L.onOwn)} land there</span>`:`<span class="s">Its page is ${esc(L.own)} (${pct(L.onOwn)} land there)</span>`;
+  else if(sepOf(c)==='yes')sub=`<span class="s">Moves to ${esc(slugOf(c))} once that page is live</span>`;
+  return `<span class="cell">${head}${sub}</span>`;
 }
 /* Own ad group from the cluster's focus keyword (Parag, 30 Oct): full = the live ad group with most clicks that bids on it
    also bids on most of the cluster's keyword volume; focus = only the focus keyword is there; missing = no live ad group
@@ -1397,7 +1398,19 @@ const NOTNOW=['No reason given','No page planned','Too small','No supply','Alrea
 const pageSells=c=>{const pg=DR.clusters[c.id]?.products_page;return !!(c.pages.length&&pg&&pg.n&&!isHome(pg.page)&&sold(c).n)};
 const trigOf=c=>{const T=DR.clusters[c.id]?.trig||{own:0,other:0,ai:0},t=T.own+T.other+T.ai;return{...T,total:t,own_sh:t?T.own/t:0,ai_sh:t?T.ai/t:0}};
 const ownAgShare=c=>DR.clusters[c.id]?.ag_serving?.own_share||0;
-function landsOff(c){const mp=mainPage(c),L=c.adg?.landing;if(!mp||mp.home||pathOf(mp)==='/'||!L)return false;return pathOf(mp).replace(/\/$/,'')!==L.path.replace(/\/$/,'')}
+/* Where a cluster's paid clicks land: the landing pages of every ad group that served its searches, each weighted by the
+   cluster's share of that ad group's clicks (export_hybrid lp_cid). Google reports landing pages per ad group, not per
+   search, so it is an estimate; most ad groups point at one page. A shared generic ad group's landing is not taken for
+   the cluster's: that read flagged Flights to Milford Sound, whose clicks land 94% on its own page. */
+function landOf(c){const lp=DR.clusters[c.id]?.lp||[];if(!lp.length)return null;
+  const mp=mainPage(c)||(S.pmap[c.id]&&S.pmap[c.id]!=='none'?{path:S.pmap[c.id]}:null), ownHome=!!mp&&(!!mp.home||pathOf(mp)==='/');
+  const own=mp?(ownHome?'/':pathOf(mp)):null, isOwn=p=>ownHome?isHome(p):normPath(p)===normPath(own);
+  const top=lp[0];return{path:top.path,host:top.host,share:top.share||0,own,ownHome,onOwn:own?lp.filter(x=>isOwn(x.path)).reduce((s,x)=>s+(x.share||0),0):null}}
+// A mismatch is worth Perf's time only on a buying cluster with clicks enough to act on: ads for an informational search
+// landing on home, where people buy, can be deliberate.
+const LAND_MIN=20;
+function landsOff(c){const L=landOf(c);return !!L&&!!L.own&&!L.ownHome&&TR(c)&&(c.clicks||0)>=LAND_MIN&&L.onOwn<0.5}
+const landTxt=c=>{const L=landOf(c);return L?(isHome(L.path)?'the home page':esc(L.path)):''};
 /* The opportunity tree (Aditya, 5 Nov) on the page type from the mapping prompt. `step` records each question as it is
    asked, so the Paid tab shows the exact path that drafted the ask. */
 function askOf(c,trace){
@@ -1414,12 +1427,12 @@ function askOf(c,trace){
   const T=trigOf(c), cov=c.cover, bar=lowBar(c), low=(cov==null||cov<bar)&&v>=TH().minSearches, covTxt=cov==null?' · no paid impressions':` · coverage ${pct(cov,cov<.01?1:0)}`;
   const covA=cov==null?(v>=TH().minSearches?`no paid impressions: not in the ads yet (${k(v)} searches)`:'no paid impressions measured'):`${cov<.001?'under 0.1%':pct(Math.min(cov,1),cov<.01?1:0)}${cov>1?'+':''} against a ${pct(bar)} bar${v<TH().minSearches?`, but only ${n(v)} searches (bar applies from ${n(TH().minSearches)})`:''}`;
   const offPage=landsOff(c)&&(c.clicks||0)>=100;
-  const landA=()=>c.adg?.landing?`${isHome(c.adg.landing.path)?'the home page':esc(c.adg.landing.path)}${mainPage(c)?`, not ${esc(pathOf(mainPage(c)))}`:''}`:'–';
+  const landA=()=>landOf(c)?`${landTxt(c)}${mainPage(c)?`, not ${esc(pathOf(mainPage(c)))}`:''}`:'–';
   // Sub-Attraction A: every main ticket includes it, so it sells the main tickets. Its keywords join the main ticket ad
   // group, with ads landing on its own page; it never gets an ad group of its own.
   if(pt==='Sub-Attraction A'){
     step('Do its ads land on its page?',offPage?`${n(c.clicks)} paid clicks land on ${landA()}`:'yes, or too few clicks to tell',!offPage);
-    if(offPage)return{type:'landing',why:`${n(c.clicks)} paid clicks land on ${esc(c.adg.landing.path)}, not ${esc(pathOf(mainPage(c)))}`};
+    if(offPage)return{type:'landing',why:`${pct(1-landOf(c).onOwn)} of ${n(c.clicks)} paid clicks land on ${landTxt(c)}, not ${esc(pathOf(mainPage(c)))}`};
     step('Is coverage high enough?',covA,!low);
     return low?{type:'mainag',why:`${k(v)} searches${covTxt} · entry comes with every main ticket`}:null}
   step('Is coverage high enough?',covA,!low);
@@ -1434,7 +1447,7 @@ function askOf(c,trace){
     return{note:'rpc',why:`${covTxt.slice(3)} with its set-up complete · RPC ${money2(c.rpc)} vs CPC ${money2(c.cpc)}`};
   }
   step('Do its ads land on its page?',offPage?`${n(c.clicks)} paid clicks land on ${landA()}`:'yes, or too few clicks to tell',!offPage);
-  if(offPage)return{type:'landing',why:`${n(c.clicks)} paid clicks land on ${esc(c.adg.landing.path)}, not ${esc(pathOf(mainPage(c)))}`};
+  if(offPage)return{type:'landing',why:`${pct(1-landOf(c).onOwn)} of ${n(c.clicks)} paid clicks land on ${landTxt(c)}, not ${esc(pathOf(mainPage(c)))}`};
   const kids=C.filter(x=>DERIVED[x.id]===c.id&&live().includes(x)&&sellsPage(x));
   if(cov!=null&&!low&&v>=TH().minSearches&&kids.length){step('Do its sub-clusters need asks?',`${kids.length} sub-cluster${kids.length>1?'s':''} run through the same steps`,null);
     return{note:'subs',kids:kids.map(x=>x.id),why:`coverage ${pct(Math.min(cov,1))}${cov>1?'+':''} · ${kids.length} sub-cluster${kids.length>1?'s':''}`}}
@@ -1462,7 +1475,7 @@ function askWhy(c,t){const T=trigOf(c),cov=c.cover;
   if(t==='cover')return `${k(c.vol)} searches a month; our ads show for ${cov==null?'–':cov<.001?'under 0.1%':pct(Math.min(cov,1),cov<.01?1:0)} of them${topSearches(c)}. Perf picks the keywords and the ad group`;
   if(t==='dedicated')return `${k(c.vol)} searches, ${cov==null?'–':pct(Math.min(cov,1))} covered; its clicks come through ad groups built for other clusters${c.pages.length?'':'. The page goes to content first'}`;
   if(t==='mainag')return `${k(c.vol)} searches${topSearches(c)}, ${cov==null?'–':cov<.001?'under 0.1%':pct(Math.min(cov,1),cov<.01?1:0)} covered; ${esc(pageTypeOf(c).replace('Sub-Attraction','sub-attraction'))}: every main ticket includes it, so ads land on ${mainPage(c)&&!mainPage(c).home?esc(pathOf(mainPage(c))):'the main ticket page'}`;
-  if(t==='landing')return `${n(c.clicks)} paid clicks go to ${isHome(c.adg?.landing?.path)?'the home page':esc(c.adg?.landing?.path||'')} instead`;
+  if(t==='landing')return `${pct(1-(landOf(c)?.onOwn||0))} of ${n(c.clicks)} paid clicks go to ${landTxt(c)} instead`;
   if(t==='setup')return `${k(c.vol)} searches a month, a product on sale, no ads on this CE yet`;
   return ''}
 const kidLine=c=>{const K=C.filter(x=>DERIVED[x.id]===c.id&&live().includes(x)&&ASKS_()[x.id]?.type);return K.length?`<span class="s">${n(K.length)} sub-cluster${K.length>1?'s':''} also need${K.length>1?'':'s'} an ask: ${K.map(x=>esc(shortName(x,c.id))).join(', ')}</span>`:''};
@@ -1739,7 +1752,7 @@ function OPPS_(){const out=[],L=live().filter(c=>!OTHER(c)),A=ASKS_();
     if(pc)
       add('perfcall',c,`Ask Perf to bid on “${esc(focusLabel(c)||nm(c))}”`,`${esc(pageTypeOf(c))} page, ${cv<.001?'under 0.1%':pct(cv,cv<.01?1:0)} covered; ${esc(SUPPLY_SHORT[prodState(c).v]||'')}${prodState(c).text?` (${esc(prodState(c).text)})`:''}`,c.vol||0,`${k(c.vol)} searches / mo`);
     if(HASPAID&&landsOff(c)&&(c.clicks||0)>=100&&d?.type!=='landing'&&mp)
-      add('landing',c,`Land its ads on ${esc(mp.home?'home':pathOf(mp))}`,`Its core ad group lands on ${isHome(c.adg.landing.path)?'home':esc(c.adg.landing.path)}`,c.clicks,`${n(c.clicks)} paid clicks`);
+      add('landing',c,`Land its ads on ${esc(mp.home?'home':pathOf(mp))}`,`Most of its clicks land on ${landTxt(c)} (${pct(landOf(c)?.share)})`,c.clicks,`${n(c.clicks)} paid clicks`);
     if(HASPAID){searchesToAdd(c).forEach(t=>add('add',c,`“${esc(t.term)}”`,`ROI ${pct(t.cm1/t.spend)}${t.ai&&t.ai>=.5*t.clicks?' · mostly AI Max':''}`,t.clicks,`${n(t.clicks)} clicks`,t.term));
       (x.searches||[]).filter(q=>!q.kw&&!isAdKw(q.term)&&q.ai&&q.ai>=.5*q.clicks&&q.clicks>=addMin()&&!searchesToAdd(c).includes(q)).forEach(t=>add('aimax',c,`“${esc(t.term)}”`,`ROI ${t.spend?pct(t.cm1/t.spend):'–'}`,t.clicks,`${n(t.clicks)} clicks`,t.term))}
   });
@@ -2127,6 +2140,8 @@ function urlCell(c){if(OTHER(c))return '<span class="dim">–</span>';
   if(ai.mapping==='needs_review'&&!picked&&!(c.id in S.sep)){const opts=[...livePaths()].sort(), lk=likelyPage(c), o=lk&&owner(lk.path);
     const top=lk?`<span>${urlBtn(lk.path)} <button class="lnk s" data-pmapuse="${c.id}|${esc(lk.path)}">Use it</button></span>${note(`Likely page${o?`, already ${esc(nm(o))}'s`:''} · needs review`,' warn')}${o&&o.vol===c.vol?note(`Same searches as ${esc(nm(o))} (${k(c.vol)}/mo): one demand`)+mergeBtn(o):''}`:note('Needs review: an existing page may cover it',' warn');
     return `<span class="cell">${top}<span class="pmrow"><select class="isel" data-pmap="${c.id}" aria-label="Existing page for ${esc(nm(c))}"><option value="">${lk?'Another page':'Pick a page'}</option>${opts.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}</select><button class="lnk s" data-pmapnone="${c.id}">No page covers it</button></span></span>`}
+  const st=S.lstate[c.id]==='launched'?'<span class="pill ok">Launched</span>':S.lstate[c.id]==='flagged'?'<span class="pill warn">Supply flagged by content</span>':S.sentContent?.has(c.id)||S.pstat[c.id]?'<span class="pill acc">With content</span>':'';
+  if(st)return `<span class="cell"><span class="purl">${esc(slugOf(c))}</span>${st}</span>`;
   const sep=sepOf(c);
   if(sep==='no')return `<span class="cell"><span class="dim">No page of its own</span>${note((TR(c)?'Lands on the CE’s page':'A section of another page')+mineDiff)}<button class="lnk s" data-urladd="${c.id}">Ask for a page</button></span>`;
   if(sep!=='yes')return `<span class="cell"><span class="dim">${esc(slugOf(c))}</span>${note('Own page not decided')}<span class="pmrow"><button class="lnk s" data-urladd="${c.id}">Make it a page</button><button class="lnk s" data-sepset="${c.id}:no">Keep as a section</button></span></span>`;
@@ -2267,7 +2282,7 @@ function contentItem(c){const sug=suggestSep(c);return{cluster_id:c.id,cluster:n
   supply:supplyText(c),own_page:'Yes',decided_by:'Growth',differs_from_suggestion:sug&&sug!==sepOf(c),subdomain:subdOn(c)?subdUrlOf(c):null,
   suggested_page_type:pageTypeOf(c),suggested_slug:slugify(focusLabel(c)||nm(c)),existing_entities:(c.entity?.items||[]).map(e=>({type:e.type,id:e.id??null,name:e.name})),current_page:null}}
 function askItem(c){const t=askFinal(c),d=ASKS_()[c.id],T=trigOf(c),a=askState(c);return{cluster_id:c.id,cluster:nm(c),ask:askTitle(c,t).replace(/<[^>]+>/g,''),origin:a.v==='agree'?'Drafted, agreed':d?.type?`Changed from ${ASK[d.type]}`:'Added by growth',
-  reason:(askWhy(c,t)||d?.why||'').replace(/<[^>]+>/g,''),evidence:{searches:c.vol||0,supply:supplyText(c),page:mainPage(c)?(mainPage(c).home?'/':pathOf(mainPage(c))):null,ads_land_on:c.adg?.landing?.path||null,coverage:c.cover,own_keywords_share:T.total?+T.own_sh.toFixed(3):null,ai_max_share:T.total?+T.ai_sh.toFixed(3):null,own_ad_group_share:+ownAgShare(c).toFixed(3),rpc:c.rpc,cpc:c.cpc,roi:c.roi},
+  reason:(askWhy(c,t)||d?.why||'').replace(/<[^>]+>/g,''),evidence:{searches:c.vol||0,supply:supplyText(c),page:mainPage(c)?(mainPage(c).home?'/':pathOf(mainPage(c))):null,ads_land_on:landOf(c)?.path||null,ads_land_share:landOf(c)?+landOf(c).share.toFixed(3):null,coverage:c.cover,own_keywords_share:T.total?+T.own_sh.toFixed(3):null,ai_max_share:T.total?+T.ai_sh.toFixed(3):null,own_ad_group_share:+ownAgShare(c).toFixed(3),rpc:c.rpc,cpc:c.cpc,roi:c.roi},
   watch_list:TH().newCE?lossList(c).map(t=>({term:t.term,clicks:t.clicks,spend:t.spend,roi:t.spend?+(t.cv/t.spend).toFixed(2):null})):undefined,
   // Only searches growth agreed in Opportunities; a set-aside or undecided search never reaches Perf.
   search_terms_to_add:agreedAdds(c).map(t=>({term:t.term,clicks:t.clicks,roi:+(t.cm1/t.spend).toFixed(2),ai_max:!!(t.ai&&t.ai>=.5*t.clicks)})),
@@ -2669,9 +2684,9 @@ function drawer(c){
     const fun=f=>f?[n(f.sessions),pct(f.select),`<span ${hOrder&&f.order<.5*hOrder?'class="warn" title="Under half the home page\'s rate"':''}>${pct(f.order,1)}</span>`]:[dash,dash,dash];
     const pageRows=c.pages.map(p=>{const o=org[base(p.path)]||{}, F=fun(p.funnel);return `<tr><td>${urlBtn(pathOf(p))}<div class="s">${esc(p.type)}${p.noindex?' · noIndex':''} · ${p.how==='poi'||p.how==='collection'?`linked by its tag, ${esc(p.tag)}`:'linked by its text'}</div></td><td class="num">${F[0]}</td><td class="num">${F[1]}</td><td class="num">${F[2]}</td><td class="num">${n(p.orders)}</td><td class="num">${usd(p.revenue)}</td><td class="num">${p.organic_orders?n(p.organic_orders):dash}</td>${orgOn?`<td class="num">${o.clicks?n(o.clicks):dash}</td><td class="num">${o.impr?(o.pw/o.impr).toFixed(1):dash}</td>`:''}</tr>`}).join('')
       +(HF&&c.pages.length?`<tr class="cmp"><td><span class="s">${D.ce.home==='/'?'Home':esc(D.ce.home)}, for comparison</span></td><td class="num">${n(HF.sessions)}</td><td class="num">${pct(HF.select)}</td><td class="num">${pct(HF.order,1)}</td><td colspan="${orgOn?5:3}"></td></tr>`:'');
-    const pmp=mainPage(c), pst2=prodState(c), aLand=c.adg?.landing, aOff=landsOff(c);
+    const pmp=mainPage(c), pst2=prodState(c), aLand=landOf(c), aOff=landsOff(c);
     const pans=`<div class="panswer ${pmp?(aOff?'no':'ok'):'unset'}"><b>${pmp?`Served by ${esc(pmp.home?'the home page':pathOf(pmp))} · ${esc(pageTypeOf(c))}`:`No page yet · would be ${esc(pageTypeOf(c))}`}</b>
-      ${HASPAID&&aLand?`<span>Its core ad group lands on ${isHome(aLand.path)?'the home page':esc(aLand.path)}${pmp?(aOff?', not its page: a Perf ask covers this.':', its own page.'):'.'}</span>`:''}
+      ${HASPAID&&aLand?`<span>${pct(aLand.share)} of its paid clicks land on ${isHome(aLand.path)?'the home page':esc(aLand.path)}${pmp?(aOff?', not its page: a Perf ask covers this.':aLand.onOwn>=0.5?', its own page.':'.'):'.'}</span>`:''}
 </div>`;
     let fpart='';
     if(fam){const R=sumBy(famC,'land'), T=famC.reduce((a,r)=>a+r.clicks,0);
