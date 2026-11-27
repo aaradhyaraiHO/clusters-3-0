@@ -945,6 +945,14 @@ body{background:#f8f8f8}
 .chain{display:grid;grid-template-columns:56px minmax(0,1fr);gap:10px;color:var(--fg3);font-size:12px;line-height:16px}.chain .num{text-align:right}.chain b{color:var(--fg2);font-weight:500}
 .drawer .dt tr.cmp td{background:var(--panel)}
 .drawer .dt span.warn{color:var(--warn)}
+/* Cluster table header: one even row. The +N group buttons are sized to the label line so they do not stretch the
+   row, every label is centred in it (Launch included), and the pinned Cluster column casts the same edge shadow as the
+   pinned Launch column, so a column scrolled under it reads as covered rather than cut. */
+.tbl.ctbl thead tr.h th{padding:8px 12px;vertical-align:middle}
+.ctbl thead th .thsort,.ctbl thead th .gtog{vertical-align:middle}
+.ctbl thead th .thsort{white-space:nowrap}.ctbl col.w-own{width:136px}
+.ctbl thead th .gtog{height:20px;line-height:18px;padding:0 6px;margin-left:4px;font-size:11px}
+.ctbl th.sticky,.ctbl td.sticky{box-shadow:6px 0 8px -6px rgba(17,17,17,.18)}
 </style>
 
 <div class="wrap">
