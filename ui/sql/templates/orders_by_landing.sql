@@ -1,4 +1,4 @@
--- Orders and net revenue of __NAME__ (CE __CE__) by landing page and channel, 30 Jul to 27 Oct 2026, for
+-- Orders and net revenue of __NAME__ (CE __CE__) by landing page and channel, the pull window (window.py), for
 -- page revenue per cluster. landing_page is filled on most orders; the path is lower-cased without query or #.
 WITH final AS (
 
@@ -11,8 +11,8 @@ WITH final AS (
 
     FROM `headout-analytics.analytics_reporting.fct_orders_lambda`
 
-    WHERE created_at >= TIMESTAMP('2026-07-30')
-          AND created_at < TIMESTAMP('2026-10-28')
+    WHERE created_at >= TIMESTAMP('__START__')
+          AND created_at < TIMESTAMP('__END_1__')
           AND combined_entity_id = '__CE__'
           AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
 

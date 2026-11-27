@@ -1,6 +1,6 @@
 -- Supply for __NAME__ (CE __CE__): every experience the CE owns (dim_experiences.combined_entity_id, the old
 -- cluster_sources pull) or that the CE collection or one of its descendant collections lists, with its vendors and
--- 90-day orders (30 Jul to 27 Oct 2026). live follows cluster_sources.py: is_available and not is_hidden.
+-- 90-day orders (the pull window (window.py)). live follows cluster_sources.py: is_available and not is_hidden.
 WITH parent AS (
 
     SELECT
@@ -92,8 +92,8 @@ experience_orders AS (
 
     FROM `headout-analytics.analytics_reporting.fct_orders_lambda`
 
-    WHERE created_at >= TIMESTAMP('2026-07-30')
-          AND created_at < TIMESTAMP('2026-10-28')
+    WHERE created_at >= TIMESTAMP('__START__')
+          AND created_at < TIMESTAMP('__END_1__')
           AND experience_id IN (SELECT experience_id FROM experiences)
           AND order_status IN ('Completed', 'Partially Completed', 'Pending')
 

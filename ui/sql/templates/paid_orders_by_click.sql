@@ -5,7 +5,7 @@
 WITH o AS (
     SELECT order_id, combined_entity_id AS ce, amount_revenue_usd AS rev
     FROM `headout-analytics.analytics_reporting.fct_orders_lambda`
-    WHERE created_at BETWEEN '2026-07-30' AND '2026-10-28' AND combined_entity_id = '__CE__' AND channel_grouping = 'Paid'
+    WHERE created_at BETWEEN '__START__' AND '__END_1__' AND combined_entity_id = '__CE__' AND channel_grouping = 'Paid'
           AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
 ),
 b AS (SELECT DISTINCT order_id, booking_id FROM `headout-analytics.analytics_reporting.fct_bookings_lambda` WHERE order_id IN (SELECT order_id FROM o)),
@@ -20,7 +20,7 @@ c AS (
     SELECT gclid, ANY_VALUE(CAST(ad_group_id AS STRING)) AS ad_group_id, ANY_VALUE(ad_group_name) AS ad_group_name,
            ANY_VALUE(campaign_name) AS campaign_name, ANY_VALUE(LOWER(keyword_text)) AS keyword_text, ANY_VALUE(keyword_match_type) AS keyword_match_type
     FROM `headout-analytics.analytics_reporting.google_ads_click_stats`
-    WHERE report_date BETWEEN '2026-07-24' AND '2026-10-28' AND gclid IN (SELECT gclid FROM og)
+    WHERE report_date BETWEEN '__START_M6__' AND '__END_1__' AND gclid IN (SELECT gclid FROM og)
     GROUP BY 1
 )
 SELECT ce, IF(gclid IS NULL, 'no_gclid', IF(c.gclid IS NULL, 'gclid_no_click', 'matched')) AS match_status,

@@ -1,4 +1,4 @@
--- __NAME__ (cid__CE__) Google Ads totals by campaign and network, 30 Jul to 27 Oct 2026: the campaign-level numbers
+-- __NAME__ (cid__CE__) Google Ads totals by campaign and network, the pull window (window.py): the campaign-level numbers
 -- (every click, including traffic Google ties to no keyword) next to the keyword-level sums the cluster split uses.
 WITH campaigns AS (
 
@@ -9,7 +9,7 @@ WITH campaigns AS (
 
     FROM `segment-data.google_adwords_prepaid.p_ads_Campaign_6251119615`
 
-    WHERE _PARTITIONTIME = TIMESTAMP('2026-10-27')
+    WHERE _PARTITIONTIME = TIMESTAMP('__END__')
           AND REGEXP_CONTAINS(campaign_name, r'cid__CE__\b')
 
     GROUP BY 1
@@ -30,8 +30,8 @@ campaign_stats AS (
 
     FROM `segment-data.google_adwords_prepaid.p_ads_CampaignBasicStats_6251119615`
 
-    WHERE _PARTITIONTIME BETWEEN TIMESTAMP('2026-07-30') AND TIMESTAMP('2026-10-28')
-          AND segments_date BETWEEN '2026-07-30' AND '2026-10-27'
+    WHERE _PARTITIONTIME BETWEEN TIMESTAMP('__START__') AND TIMESTAMP('__END_1__')
+          AND segments_date BETWEEN '__START__' AND '__END__'
           AND campaign_id IN (SELECT campaign_id FROM campaigns)
 
     GROUP BY 1, 2
@@ -50,8 +50,8 @@ keyword_stats AS (
 
     FROM `segment-data.google_adwords_prepaid.p_ads_KeywordBasicStats_6251119615`
 
-    WHERE _PARTITIONTIME BETWEEN TIMESTAMP('2026-07-30') AND TIMESTAMP('2026-10-28')
-          AND segments_date BETWEEN '2026-07-30' AND '2026-10-27'
+    WHERE _PARTITIONTIME BETWEEN TIMESTAMP('__START__') AND TIMESTAMP('__END_1__')
+          AND segments_date BETWEEN '__START__' AND '__END__'
           AND segments_ad_network_type = 'SEARCH'
           AND campaign_id IN (SELECT campaign_id FROM campaigns)
 

@@ -9,8 +9,8 @@ WITH latest_runs AS (
 
     FROM `segment-data.product_rankings.product_rankings_created_v2`
 
-    WHERE ranked_timestamp >= TIMESTAMP('2026-10-27')
-          AND ranked_timestamp < TIMESTAMP('2026-11-03')
+    WHERE ranked_timestamp >= TIMESTAMP('__END__')
+          AND ranked_timestamp < TIMESTAMP('__END_7__')
           AND entity_type = 'COLLECTION'
           AND entity_id IN (__COLLECTIONS__)
 
@@ -45,8 +45,8 @@ ranked AS (
         AND created.city = latest_city.city
         AND created.ranked_timestamp = latest_city.ranked_timestamp
 
-    WHERE created.ranked_timestamp >= TIMESTAMP('2026-10-27')
-          AND created.ranked_timestamp < TIMESTAMP('2026-11-03')
+    WHERE created.ranked_timestamp >= TIMESTAMP('__END__')
+          AND created.ranked_timestamp < TIMESTAMP('__END_7__')
           AND created.entity_type = 'COLLECTION'
 
 ),
@@ -61,8 +61,8 @@ orders AS (
 
     FROM `headout-analytics.analytics_reporting.fct_orders_lambda`
 
-    WHERE created_at >= TIMESTAMP('2026-07-29')
-          AND created_at < TIMESTAMP('2026-10-28')
+    WHERE created_at >= TIMESTAMP('__START_M1__')
+          AND created_at < TIMESTAMP('__END_1__')
           AND order_status NOT IN ('Dummy', 'Cancelled - Fraudulent')
 
     GROUP BY 1

@@ -1,5 +1,5 @@
 -- Orders and net revenue per variant of the experiences shown on a __NAME__ (CE __CE__) page,
--- 30 Jul to 27 Oct 2026, all channels and paid search alone.
+-- the pull window (window.py), all channels and paid search alone.
 SELECT
     experience_id,
     variant_id,
@@ -9,8 +9,8 @@ SELECT
 
 FROM `headout-analytics.analytics_reporting.fct_orders_lambda`
 
-WHERE created_at >= TIMESTAMP('2026-07-30')
-      AND created_at < TIMESTAMP('2026-10-28')
+WHERE created_at >= TIMESTAMP('__START__')
+      AND created_at < TIMESTAMP('__END_1__')
       AND experience_id IN UNNEST(SPLIT('__EXPERIENCES__'))
       AND order_status IN ('Completed', 'Partially Completed', 'Pending')
 

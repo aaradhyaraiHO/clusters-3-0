@@ -1,4 +1,4 @@
--- Select → checkout → order per matched experience on the __NAME__ CE, 30 Jul to 27 Oct 2026, counted in distinct
+-- Select → checkout → order per matched experience on the __NAME__ CE, the pull window (window.py), counted in distinct
 -- users across every channel, as the TGID funnel in scripts/market_weekly_review_v5.py (q_tgid_funnel) counts them.
 -- That script reads mixpanel_user_funnel_progression, which only keeps about 18 days, so a 90-day window has to come
 -- from the page-level table instead.
@@ -12,8 +12,8 @@ WITH funnel AS (
 
     FROM `headout-analytics.analytics_reporting.mixpanel_user_page_funnel_progression`
 
-    WHERE event_date >= '2026-07-30'
-          AND event_date <= '2026-10-27'
+    WHERE event_date >= '__START__'
+          AND event_date <= '__END__'
           AND combined_entity_id = '__CE__'
 
     GROUP BY 1

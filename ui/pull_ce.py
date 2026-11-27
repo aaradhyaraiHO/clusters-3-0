@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from window import tokens as window_tokens, window
+
 HERE = Path(__file__).resolve().parent
 TEMPLATES = HERE / "sql" / "templates"
 # Collections come from the pages, products from the collections, so these run first and in this order.
@@ -37,7 +39,7 @@ def render(name, ce, cfg, collections="", experiences=""):
     site = re.sub(r"^www\.", "", host)
     sql = (TEMPLATES / f"{name}.sql").read_text()
     for token, value in {"__NAME__": cfg["name"], "__HOST__": host, "__SITE_RE__": site.replace(".", r"\."), "__SITE__": site,
-                         "__COLLECTIONS__": collections, "__EXPERIENCES__": experiences, "__CE__": ce}.items():
+                         "__COLLECTIONS__": collections, "__EXPERIENCES__": experiences, "__CE__": ce, **window_tokens()}.items():
         sql = sql.replace(token, value)
     # A CE whose pages also sit on another site (Park Güell under barcelona-tickets.com/park-guell) lists those uid
     # prefixes in ces.json page_prefixes; Payload pages are read from its own host and from each of them.
@@ -74,6 +76,9 @@ def main():
     cfg = json.loads((HERE / "ces.json").read_text())["ces"][a.ce]
     folder = HERE / cfg["out"]
     folder.mkdir(exist_ok=True)
+    # The export labels the CE's numbers with the window they were pulled on, not whatever window.py says later.
+    start, end = window()
+    (folder / "window.json").write_text(json.dumps({"start": start, "end": end}))
     env = {**os.environ, "CLOUDSDK_CONFIG": gcloud_config()}
     names = [t.stem for t in sorted(TEMPLATES.glob("*.sql"))]
     order = STAGED + [n for n in names if n not in STAGED]

@@ -56,6 +56,11 @@ else:
     SOURCES = None
     PAGES, LANDING = OUT / f"pages_mapped_{CE}.csv", OUT / "landing_pages.csv"
 SITE = HOST.replace("www.", "")
+# The window this CE's Google Ads and order data was pulled on (pull_ce.py writes window.json); the fixed window for a
+# CE pulled before that existed.
+from window import FIXED as _FIXED, label as _window_label
+_win = json.loads((OUT / "window.json").read_text()) if CE != 189 and (OUT / "window.json").exists() else {"start": _FIXED[0], "end": _FIXED[1]}
+WINDOW_LABEL = _window_label(_win["start"], _win["end"])
 # The head-term cluster: named "... Head Term" in Vatican's and Milford's sets, named in ces.json otherwise (Park Güell's is "Park Güell").
 HEAD_NAME = None if CE == 189 else CFG.get("head")
 MIN_TERM_CLICKS = 20
@@ -114,9 +119,9 @@ if CE == 189:
     v3 = json.load(open(HERE / "vatican.json"))
 else:
     landed = pd.read_csv(OUT / f"orders_by_landing_{CE}.csv")
-    v3 = {"ce": {"id": str(CE), "name": CFG["name"], "host": HOST, "window": "30 Jul – 27 Oct 2026",
+    v3 = {"ce": {"id": str(CE), "name": CFG["name"], "host": HOST, "window": WINDOW_LABEL,
                  "revenue": round(float(landed["sum_revenue_usd"].sum()), 2), "orders": int(landed["count_orders"].sum()),
-                 "banner": "Real: clusters and keywords (11-CE hybrid run), Google Ads search terms, keywords and ad groups (30 Jul – 27 Oct), "
+                 "banner": f"Real: clusters and keywords (11-CE hybrid run), Google Ads search terms, keywords and ad groups ({WINDOW_LABEL}), "
                            "orders, paid revenue traced by click, Mixpanel funnel, Payload pages and Search Console. Not loaded for "
                            f"{CFG['name']}: Satvik's capture numbers, Headout entities. Pages map to clusters by meaning."}, "change_log": []}
 old = {c["id"]: c for c in v3.get("clusters", [])}
@@ -1594,7 +1599,7 @@ spread[["kw_key", "cid", "impr", "clicks", "spend", "conv_value", "w_clicks"]].t
 pairs[["kw_key", "ag", "term", "impr", "clicks", "spend", "conv_value", "cid", "how"]].to_csv(OUT / f"audit_terms_{CE}.csv", index=False)
 totals_all.merge(totals[["kw_key", *METRICS]], on="kw_key", suffixes=("_all", "_en")).to_csv(OUT / f"audit_keywords_{CE}.csv", index=False)
 (OUT / "drawer.json").write_text(json.dumps({"clusters": drawer}, separators=(",", ":")))
-(OUT / "impression_share.json").write_text(json.dumps({"window": "30 Jul - 27 Oct", "hidden_spend": 0, "total_spend": r(spread["spend"].sum(), 2),
+(OUT / "impression_share.json").write_text(json.dumps({"window": WINDOW_LABEL, "hidden_spend": 0, "total_spend": r(spread["spend"].sum(), 2),
                                                         "clusters": {c["id"]: {"catch_all": c["catch_all"]} for c in clusters}}))
 print(f"{len(clusters)} clusters; paid clicks {r(spread['clicks'].sum())}, spend {r(spread['spend'].sum())}, CM1 {r(spread['conv_value'].sum())}; "
       f"paid revenue traced {'n/a' if traced_share is None else f'{traced_share:.0%}'}; clusters with a page {sum(bool(c['pages']) for c in clusters)}")

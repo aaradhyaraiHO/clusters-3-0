@@ -9,6 +9,7 @@ ce_sources.csv. A CE id that is not a number (a placeholder such as "18 - Key We
 are written empty with their headers. Writes <clusters_3_0>/snapshots/new_<slug>/, which map_ce.build_snapshot reads in
 place of the 30 Oct snapshot.
 """
+from window import window
 import argparse
 import os
 import re
@@ -20,8 +21,8 @@ from pathlib import Path
 
 import pandas as pd
 
-WINDOW = ("2026-07-30", "2026-10-27")
-PARTITION = "2026-10-27"
+WINDOW = window()
+PARTITION = WINDOW[1]
 HEADERS = {
     "campaigns": ["campaign_id", "campaign_name", "ce"],
     "search_term_pairs": ["ce", "kw_key", "term", "match_type", "impr", "clicks", "spend", "conv", "conv_value"],

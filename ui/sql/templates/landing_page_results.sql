@@ -1,4 +1,4 @@
--- __NAME__ (cid__CE__) results by ad group and landing page, 30 Jul to 27 Oct 2026. Google Ads has no conversions in
+-- __NAME__ (cid__CE__) results by ad group and landing page, the pull window (window.py). Google Ads has no conversions in
 -- its landing-page view, so ad-level stats are joined to each ad's final URL.
 WITH campaigns AS (
 
@@ -8,7 +8,7 @@ WITH campaigns AS (
 
     FROM `segment-data.google_adwords_prepaid.p_ads_Campaign_6251119615`
 
-    WHERE _PARTITIONTIME = TIMESTAMP('2026-10-28')
+    WHERE _PARTITIONTIME = TIMESTAMP('__END_1__')
           AND REGEXP_CONTAINS(campaign_name, r'cid__CE__\b')
 
 ),
@@ -23,7 +23,7 @@ ads AS (
 
     FROM `segment-data.google_adwords_prepaid.p_ads_Ad_6251119615`
 
-    WHERE _PARTITIONTIME = TIMESTAMP('2026-10-28')
+    WHERE _PARTITIONTIME = TIMESTAMP('__END_1__')
 
 ),
 
@@ -44,10 +44,10 @@ ad_stats AS (
     INNER JOIN campaigns
         ON stats.campaign_id = campaigns.campaign_id
 
-    WHERE stats._PARTITIONTIME >= TIMESTAMP('2026-07-30')
-          AND stats._PARTITIONTIME < TIMESTAMP('2026-10-29')
-          AND stats.segments_date >= '2026-07-30'
-          AND stats.segments_date <= '2026-10-27'
+    WHERE stats._PARTITIONTIME >= TIMESTAMP('__START__')
+          AND stats._PARTITIONTIME < TIMESTAMP('__END_2__')
+          AND stats.segments_date >= '__START__'
+          AND stats.segments_date <= '__END__'
 
     GROUP BY 1, 2, 3
 
