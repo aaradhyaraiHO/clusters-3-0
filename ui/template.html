@@ -953,6 +953,14 @@ body{background:#f8f8f8}
 .ctbl thead th .thsort{white-space:nowrap}.ctbl col.w-own{width:136px}
 .ctbl thead th .gtog{height:20px;line-height:18px;padding:0 6px;margin-left:4px;font-size:11px}
 .ctbl th.sticky,.ctbl td.sticky{box-shadow:6px 0 8px -6px rgba(17,17,17,.18)}
+/* Column order (27 Nov): widths that fit a 1440 window. Setup status keeps its place and is sticky: scrolled sideways,
+   it stops against the Cluster column (--stk, that column's width, is set after each render). */
+.ctbl col.w-sticky{width:186px}.ctbl th.sticky,.ctbl td.sticky{min-width:186px;max-width:186px}
+.ctbl col.w-vol{width:100px}.ctbl col.w-status{width:130px}.ctbl col.w-fold{width:64px}.ctbl col.w-setup{width:190px}
+.ctbl col.w-prod{width:136px}.ctbl col.w-url{width:216px}.ctbl col.w-ptype{width:128px}
+.ctbl th.c-setup,.ctbl td.c-setup{position:sticky;left:var(--stk,186px);z-index:2;background:var(--bg);box-shadow:6px 0 8px -6px rgba(17,17,17,.18)}
+.ctbl thead th.c-setup{z-index:4}.ctbl tbody tr.row:hover td.c-setup{background:var(--panel)}.ctbl tbody tr.sel td.c-setup{background:var(--accent-soft)}
+.ctbl thead tr.g th.dec{color:var(--accent-ink)}
 </style>
 
 <div class="wrap">
@@ -1067,7 +1075,7 @@ const entOk=c=>['coll','poi'].every(k=>{const s=entSlot(c,k);return !s.need||['f
 // Setup status only reports what the page type requires and what exists; the choices sit with Launch (entChoice).
 function entLine(c,kind){const s=entSlot(c,kind), L=kind==='coll'?'Collection':'POI', req=s.need?'required, ':'';
   if(s.state==='found')return['done',`${L}: ${req}${s.id}${s.name?' · '+s.name:''}${s.how==='page'?' (from its page)':s.how==='name'?' (matched by name)':' (picked)'}`];
-  if(s.state==='created')return['done',`${L}: created`];
+  if(s.state==='created')return['todo',`${L}: to create · API pending`];
   if(s.state==='none')return['na',`${L}: ${s.by?'not needed, set by you':'not required'}`];
   if(s.state==='gap')return['warn',`${L}: required, none yet${kind==='coll'?'; its page lists the CE collection':''}`];
   return['todo',`${L}: required, created on Launch`]}
@@ -1078,7 +1086,7 @@ function entLines(c){const a=entSlot(c,'coll'),b=entSlot(c,'poi');
    that type, a new child one, or not needed. */
 function entChoice(c,kind){const s=entSlot(c,kind);if(!s.need)return '';
   const what=kind==='coll'?'Collection':'POI';
-  if(s.state==='created')return `<span class="s">${what}: created</span>`;
+  if(s.state==='created')return `<span class="s">${what}: to create · API pending</span>`;
   const L=CE_ENTS().filter(e=>e.type===s.type), cur=s.state==='found'?String(s.id):s.state==='none'?'__none':'__new';
   const opts=L.map(e=>`<option value="${esc(String(e.id))}" ${cur===String(e.id)?'selected':''}>${esc(String(e.id))} · ${esc(e.name)}${e.active===false&&e.type==='collection'?' (inactive)':''}</option>`);
   if(s.state==='found'&&!L.some(e=>String(e.id)===cur))opts.unshift(`<option value="${esc(cur)}" selected>${esc(cur)}${s.name?' · '+esc(s.name):''}</option>`);
@@ -1317,7 +1325,7 @@ function setupSteps(c){
     L.push(st.yes?['done',`Experiences: ${on?n(on)+' on sale':'on sale'}`]:['warn',`Experiences: ${st.v==='uniq_no'?'none on sale':st.v==='none'?'no unique experience':'supply not set'}`]);
     L.push(...entLines(c))}
   const mp=mainPage(c);
-  L.push(c.pages.length?['done',`MB page: live, ${pathOf(mp||c.pages[0])}`]:ls==='launched'?['done','MB page: launched']:ls==='queued'?['now','MB page: launching']
+  L.push(c.pages.length?['done',`MB page: live, ${pathOf(mp||c.pages[0])}`]:ls==='launched'?['todo','MB page: recorded, not in Payload yet']:ls==='queued'?['now','MB page: launching']
     :S.sentContent?.has(c.id)?['now','MB page: with content']:sepOf(c)==='yes'?['todo','MB page: to create']:pageUndecided(c)?['todo','MB page: page not decided']:['na','MB page: none needed']);
   if(TR(c)&&HASPAID){const sh=ownAgShare(c), a=c.adg||{};
     L.push(sh>=.5?['done',`Ad group: own, ${pct(sh)} of clicks`]:a.state==='focus'?['warn','Ad group: focus keyword only']:a.ag?['warn',`Ad group: exists, ${pct(sh)} of clicks`]:['todo','Ad group: none of its own'])}
@@ -1365,7 +1373,7 @@ function l5Stage(c){
   if(S.perfAt[c.id])return{t:'Launched',k:'acc',n:`Perf asked ${fmtD(S.perfAt[c.id])}`};
   // Missing supply never stops a launch; only the Perf ask waits for it (26 Nov).
   const wait=TR(c)&&!prodState(c).yes&&l5Ask(c);
-  if(l5NeedsPage(c))return{t:'Launched',k:'acc',n:(S.sentContent?.has(c.id)?`page with content since ${fmtD(S.contentAt[c.id]||l5L(c).at)}`:`page in Payload's list since ${fmtD(l5L(c).at)}`)+(wait?'; Perf ask waits for supply':'')};
+  if(l5NeedsPage(c))return{t:'Launched',k:'acc',n:(S.sentContent?.has(c.id)?`page with content since ${fmtD(S.contentAt[c.id]||l5L(c).at)}`:`page recorded since ${fmtD(l5L(c).at)}`)+(wait?'; Perf ask waits for supply':'')};
   if(l5Ask(c))return wait?{t:'Launched',k:'acc',n:'Perf ask waits for supply'}:c.pages.length?{t:'Launched',k:'acc',n:'Perf ask goes on release'}:{t:'Launched',k:'acc',n:'Perf is asked once the page is live'};
   return{t:'Live',k:'ok',n:''}}
 /* What stops a Launch (Krupa, 19 Nov: no Hold; anything that cannot launch says why and how to fix it). */
@@ -1597,12 +1605,16 @@ const ALLCOLS=[
 /* Each group shows its main columns; "+N" on the group header opens the rest. */
 /* First view (5 Nov, Krupa and Perf): one table for growth and content with five columns; paid and organic depth is
    one click away in its group or the side panel. */
+/* Column order (27 Nov): what people read on the left, what they change next to Launch. The edit block runs in the order
+   the page prompts do: is there a product (Supply), does it need its own page (Page URL), what kind (Page type, which
+   sets Launch's Collection and POI choices). Paid evidence folds next to Health, which it explains. */
 const GROUPS=[
- {id:'state',name:'Status',main:['status','setup'],more:[]},
  {id:'demand',name:'Demand',main:['vol'],more:[]},
- {id:'page',name:'Page',main:['ptype','url'],more:['ent','rank','rev','share']},
+ {id:'state',name:'Health',main:['status'],more:[]},
+ {id:'paid',name:'Paid',main:[],more:['cov','own','clicks','roi','wow','cvr','cpc','rpc','spend','impr','prev','cm1','cm1o','aimax','qs','shown','tkw','wroi']},
+ {id:'setup',name:'Setup',main:['setup'],more:[]},
  {id:'prod',name:'Supply',main:['prod'],more:[]},
- {id:'paid',name:'Paid',main:['cov','own'],more:['clicks','roi','wow','cvr','cpc','rpc','spend','impr','prev','cm1','cm1o','aimax','qs','shown','tkw','wroi']},
+ {id:'page',name:'Page',main:['url','ptype'],more:['ent','rank','rev','share']},
  {id:'next',name:'Launch',main:['lnch'],more:[]}];
 /* Every paid number at once, for anyone reading the table the way Perf does. */
 
@@ -1902,11 +1914,6 @@ function launchStep(){
 /* ---------- Execution (content): one row per cluster with a confirmed own page and no page yet. Content cross-checks the
    page type; collection and POI follow the page planning rules, fetched when they exist and created when they don't;
    the subfolder slug is content's, the subdomain is growth's. Launch hands the plan to the agent (stand-in). ---------- */
-function entCellX(c,kind){const s=entSlot(c,kind);
-  if(s.state==='found')return `<span class="pill ok" title="${esc(s.name||'')}">Exists · ${esc(s.id)}</span>`;
-  if(s.state==='created')return '<span class="pill ok">Created</span>';
-  if(s.state==='none')return `<span class="pill mute">${s.rule==='optional'?'Optional':'Not needed'}</span>`;
-  return '<span class="pill acc">Will create</span>'}
 /* MB URL guidelines (the "MB URLs" sheet, Shoulder Page tab): a page's URL is the CE's page plus a slug set by its page
    type. {name} types take a name from the cluster's focus keyword, the CE's own words aside; only that part is edited. */
 const TYPE_SLUG={'Landing Page':'','Tours':'{name}','Guided Tours':'guided-tours','Audio Guide Tours':'audio-guide','Private Tours':'private-tours',
@@ -1952,23 +1959,39 @@ const sentPages=()=>C.filter(c=>S.sentContent?.has(c.id)&&!c.pages.length);
 const withdrawnSince=c=>!toContent(c);
 function progressView(){const unsent=readyPages().filter(c=>!S.sentContent?.has(c.id)).length;
   return (unsent?`<p class="xnote">Growth has ${n(unsent)} own-page decision${unsent===1?'':'s'} not launched yet; each arrives here when growth launches it.</p>`:'')+contentQueue()}
+/* Payload's shoulderPageType values, as Sarthak listed them for create-from-url (DM, 25 Nov). A page type with no entry
+   here has no Payload value yet. */
+const PAYLOAD_PT={'Guided Tours':'GuidedTours','Private Tours':'PrivateTour','Audio Guide Tours':'AudioGuide','Skip-the-Line':'SkipTheLine',
+  'Night Tours':'NightTours','Combos':'CECombos','Sub-Attraction A':'SubAttractions','Sub-Attraction B':'SubAttractions','Sub-Attraction C':'SubAttractions',
+  'Plan Your Visit':'PlanYourVisit','Timings':'Timings','Getting There':'Directions','Parking':'Parking','About':'About','History':'History',
+  'Map':'Map','Tips':'Tips','Facts':'Facts','Custom Page':'MiscPages'};
+const payloadType=t=>PAYLOAD_PT[t]?`Payload: ${PAYLOAD_PT[t]}`:t==='Landing Page'?'the CE page itself':'no Payload type yet';
+/* Content tab (item 15, 26 Nov): one row per URL growth has launched, what it waits on and who moves next. Until the
+   Payload, entity and Perf APIs are connected, Launch only records the plan, so each row says what is still to be sent. */
+const launchedRows=()=>C.filter(c=>!OTHER(c)&&(S.sentContent?.has(c.id)||!!l5L(c)||S.lstate[c.id]==='launched')).sort((a,b)=>(b.vol||0)-(a.vol||0));
 function contentQueue(){
-  const rows=sentPages().sort((a,b)=>(b.vol||0)-(a.vol||0)), ready=rows.filter(c=>execState(c)==='ready'&&!slugError(c)&&!withdrawnSince(c));
-  const btn=c=>{const st=execState(c);return st==='launched'?`<span class="pill ok">Launched</span><div class="s"><a href="https://${esc(HOST)}${esc(slugOf(c))}" target="_blank" rel="noopener">Open page</a></div>`:st==='queued'?(S.lrun&&S.lrun.ids.includes(c.id)?'<span class="pill acc">Queued…</span>':`<span class="pill warn">Stopped</span> <button class="btn sm" data-golaunch="${c.id}" aria-label="Retry launching ${esc(nm(c))}">Retry</button>`):st==='flagged'?'<span class="pill warn">Flagged for supply</span>':st==='waiting'?'<span class="pill warn" title="Supply coming: launch when it is on sale">Waiting for supply</span>':st==='nosupply'?`<button class="btn sm" data-flagsup="${c.id}">Flag supply</button>`:withdrawnSince(c)?'<span class="s">Leaves at the next send</span>':slugError(c)?`<button class="btn sm primary" disabled aria-describedby="slugerr-${c.id}">Launch</button>`:`<button class="btn sm primary" data-golaunch="${c.id}" aria-label="Launch ${esc(nm(c))}">Launch</button>`};
-  return `<section class="xsec"><div class="xh"><h2>Pages to build <span class="s">· ${n(rows.filter(c=>S.lstate[c.id]!=='launched').length)} to build${rows.some(c=>S.lstate[c.id]==='launched')?`, ${n(rows.filter(c=>S.lstate[c.id]==='launched').length)} launched`:''}</span></h2>
-   <span class="s">Content cross-checks the page type; collection, POI and product fetching follow the page planning rules. The subfolder slug is content's, the subdomain is growth's.</span>
-   <button class="btn primary" data-launchall ${ready.length?'':'disabled'}>Launch all · ${n(ready.length)}</button></div>
-   ${rows.length?`<div class="tbox" style="min-height:0"><table class="tbl xq"><thead><tr><th class="sticky">Cluster</th><th>Supply</th><th>Page type</th><th>Collection</th><th>POI</th><th>Subfolder slug <span class="s">(content)</span></th><th>Subdomain <span class="s">(growth)</span></th><th>Products fetched by</th><th></th></tr></thead><tbody>
-   ${rows.map(c=>{const locked=['queued','launched'].includes(execState(c));return `<tr><td class="sticky"><b>${esc(nm(c))}</b><div class="tags"><span class="pill it-${typeOf(c).toLowerCase()}">${TYPE[typeOf(c)]}</span><span class="s">${n(c.vol)} searches</span>${S.contentCall[c.id]?'<span class="pill line">Content\'s call</span>':''}${withdrawnSince(c)?'<span class="pill warn" title="Growth changed its own-page decision after sending; the page leaves this queue with growth\'s next send">Withdrawn by growth</span>':''}</div></td>
-     <td class="s nowrap">${(()=>{const v=prodState(c).v;return v?esc(SUPPLY_SHORT[v]):'Not set'})()}</td>
-     <td><select class="isel" data-ptype="${c.id}" ${locked?'disabled':''} aria-label="Page type for ${esc(nm(c))}">${PAGE_TYPES.map(t=>`<option ${pageTypeOf(c)===t?'selected':''}>${t}</option>`).join('')}</select>${S.ptype[c.id]?'':'<div class="s">suggested</div>'}</td>
-     <td>${entCellX(c,'coll')}</td><td>${entCellX(c,'poi')}</td>
-     <td><input class="urlin" data-slug="${c.id}" value="${esc(slugOf(c))}" ${locked?'disabled':''} aria-label="Subfolder slug for ${esc(nm(c))}" ${!locked&&slugError(c)?`aria-invalid="true" aria-describedby="slugerr-${c.id}"`:''}>${!locked&&slugError(c)?`<div class="s err" id="slugerr-${c.id}">${esc(slugError(c))}</div>`:''}</td>
-     <td class="s">${subdOn(c)?`<span class="url">${esc(subdUrlOf(c))}</span>${ENT[pageTypeOf(c)].subd?'':'<div class="s">this page type has no subdomain by default</div>'}`:'–'}</td>
-     <td class="s">${ENT[pageTypeOf(c)].fetch}</td><td>${btn(c)}</td></tr>`}).join('')}
-   </tbody></table></div>`:'<div class="empty"><b>Nothing to build yet</b>Pages appear here once growth sends them with Review &amp; send.</div>'}
-   </section>${noPageSection()}`;
-}
+  const rows=launchedRows(), pend=c=>['coll','poi'].filter(k=>{const s=entSlot(c,k);return s.need&&['new','gap','created'].includes(s.state)});
+  const stateOf=c=>pend(c).length?'entity':c.pages.length?'live':'payload';
+  const F=S.ctf||'all', shown=rows.filter(c=>F==='all'||stateOf(c)===F), cnt=k=>k==='all'?rows.length:rows.filter(c=>stateOf(c)===k).length;
+  const chip=(k,l)=>`<button class="chip stf${F===k?' on':''}" data-ctf="${k}" aria-pressed="${F===k}"><span>${l}</span><b>${n(cnt(k))}</b></button>`;
+  const urlTd=c=>{if(c.pages.length){const mp=mainPage(c)||c.pages[0];return `${urlBtn(pathOf(mp),esc(shortPath(pathOf(mp))),pageHost(mp))}<div class="s">live page</div>`}
+    return `<span class="purl" title="${esc(slugOf(c))}">${esc(slugOf(c))}</span><div class="s">${subdOn(c)?`subdomain ${esc(subdUrlOf(c))}`:'no subdomain'}</div>`};
+  const ent=c=>{const L=['coll','poi'].map(k=>[k,entSlot(c,k)]).filter(([,s])=>s.need||s.state==='found');
+    return L.length?L.map(([k,s])=>`<div class="s">${k==='coll'?'Collection':'POI'}: ${s.state==='found'?esc(String(s.id))+' ✓':'to create · API pending'}</div>`).join(''):'<span class="s">not required</span>'};
+  const status=c=>c.pages.length?'<span class="pill ok">Live</span><div class="s">locked; changes in Payload</div>'
+    :'<span class="pill warn">Recorded here</span><div class="s">not sent to Payload yet</div>';
+  const waits=c=>{const L=pend(c).map(k=>`<b>Anuj's API</b>: create the child ${k==='coll'?'collection':'POI'}`);
+    if(!c.pages.length){L.push("<b>Payload</b>: create the page (Sarthak's create-from-url, not connected yet)");
+      const b=planOf(c).find(x=>/^Content brief/.test(x));if(b)L.push(`<b>Content</b>: ${esc(b.replace(/^Content brief: /,''))}`)}
+    if(l5Ask(c))L.push(TR(c)&&!prodState(c).yes?'<b>Supply</b>: the Perf ask waits for a product on sale':c.pages.length?"<b>Perf</b>: the ask goes to Perf's tool (not connected yet)":'<b>Perf</b>: asked once the page is live');
+    return L.map(x=>`<div class="s">${x}</div>`).join('')||'<span class="s">nothing</span>'};
+  return `<section class="xsec"><div class="xh"><h2>Launched pages <span class="s">· ${n(rows.length)}</span></h2>
+   <span class="s">One row per URL growth has launched: what it waits on and who moves next. Until the Payload, entity and Perf APIs are connected, Launch records the plan here and nothing is created yet.</span></div>
+   <div class="stchips" style="margin:0 0 10px">${chip('all','All')}${chip('entity','Waiting on an entity')}${chip('payload','Waiting on Payload')}${chip('live','Live')}</div>
+   ${shown.length?`<div class="tbox" style="min-height:0"><table class="tbl xq"><thead><tr><th class="sticky">URL</th><th>Cluster</th><th>Page type</th><th>Page status</th><th>Entities</th><th>Waiting on</th></tr></thead><tbody>
+   ${shown.map(c=>`<tr><td class="sticky">${urlTd(c)}</td><td><b>${esc(nm(c))}</b><div class="s">${n(c.vol)} searches${l5L(c)?` · launched ${fmtD(l5L(c).at)}`:''}</div></td><td>${esc(ptLabel(pageTypeOf(c)))}<div class="s">${payloadType(pageTypeOf(c))}</div></td><td>${status(c)}</td><td>${ent(c)}</td><td>${waits(c)}</td></tr>`).join('')}
+   </tbody></table></div>`:`<div class="empty"><b>${rows.length?'Nothing in this filter':'Nothing launched yet'}</b>${rows.length?'':'Pages appear here once growth launches them on the Growth tab.'}</div>`}
+   </section>${noPageSection()}`}
 /* ---------- Page pop-up (Parag, 30 Oct): what a page shows and why. The export applies the page's rules to its
    collection's published ranking; see page_shows in export_hybrid.py. ---------- */
 const PAGES=D.page_shows||{};
@@ -1983,8 +2006,8 @@ function table(){
   // Two header rows: groups that open more columns name themselves (with their +N) above their columns; a group of one
   // fixed column leaves the top cell empty, its column label says it.
   // Two halves: what the data says (left) and growth's decisions (right); each group's +N sits beside its column label.
-  const DEC=['next'], SG=shownGroups(), dataN=SG.filter(x=>!DEC.includes(x.g.id)).reduce((a,x)=>a+x.keys.length,0), decN=SG.filter(x=>DEC.includes(x.g.id)).reduce((a,x)=>a+x.keys.length,0);
-  const grp='';
+  const EDIT=['prod','page'], DEC=[...EDIT,'next'], SG=shownGroups(), span=ids=>SG.filter(x=>ids(x.g.id)).reduce((a,x)=>a+x.keys.length,0);
+  const grp=`<tr class="g"><th class="sticky"></th><th colspan="${span(id=>!DEC.includes(id))}">Read · updates itself</th><th colspan="${span(id=>EDIT.includes(id))}" class="dec">Your edits</th><th class="dec c-lnch">Act</th></tr>`;
   const h=grp+`<tr class="h">${sortTh('name',`Cluster <span class="cnt">${r.length} of ${live().length}</span>`,'sticky',S.sort)}${shownGroups().map(({g,keys})=>keys.map((key,i)=>key==='fold'?`<th class="fold gs">${g.name}${tog(g)}</th>`:sortTh(key,(key==='dstack'?'Own page · Launch':G[key][0])+tip(key)+(i===0?tog(g):''),(COLBY[key][1]||'')+(i===0?' gs':'')+' c-'+key+(DEC.includes(g.id)?' dec':''),S.sort)).join('')).join('')}</tr>`;
   const todo=c=>!OTHER(c)&&((needsSep(c)&&!sepConfirmed(c))||(!!ASKS_()[c.id]?.type&&!askState(c)));
   const rowHtml=(c,kind,extra)=>`<tr class="row ${kind||''} ${S.sel===c.id?'sel':''} " data-row="${c.id}"><td class="sticky"><div class="cn">${S.edit&&!OTHER(c)?`<input type="checkbox" class="pick" data-pick="${c.id}" ${S.pick.has(c.id)?'checked':''} aria-label="Select ${esc(nm(c))}">`:''}<div><button class="cnbtn" data-row="${c.id}"><b>${esc(kind==='kid'||kind==='kid last'?shortName(c,parentIdOf(c)):kind==='par'?topicOf(c):nm(c))}</b></button><div class="tags"><span class="pill it-${typeOf(c).toLowerCase()}">${TYPE[typeOf(c)]}</span>${edited(c)?'<span class="pill warn" title="Keywords changed here; paid and organic numbers update at the next run">Edited</span>':''}${openFlags(c.id).length?`<span class="flagt" title="${esc(openFlags(c.id).map(f=>f.text).join('\n'))}">Check: ${({fit:'fits another',split:'may split'})[String(openFlags(c.id)[0].id).split('|')[0]]||'flag'}${openFlags(c.id).length>1?` · ${openFlags(c.id).length}`:''}</span>`:''}${''}${S.sends.length&&S.sentSig[c.id]?(changedSince(c)?'<span class="pill warn">Changed since Send</span>':`${S.sentContent?.has(c.id)?'<span class="pill acc">With content</span>':''}${S.sentPerf?.has(c.id)?'<span class="pill acc">Sent to Perf</span>':''}`):''}${ncom(c)?`<span class="ccount">${ncom(c)} comment${ncom(c)>1?'s':''}</span>`:''}</div>${extra||''}</div></div></td>
@@ -2052,7 +2075,7 @@ function header(){
   // Views are named by who works there: growth decides, content builds. Perf works in its own tool from the send.
   return `<div class="hrow"><div class="title"><h1>${CES.length>1?`<select class="cesw" data-cejump aria-label="Switch CE">${CES.map(x=>`<option value="${esc(x.page)}" ${String(x.id)===String(D.ce.id)?'selected':''}>${esc(x.name)}</option>`).join('')}</select>`:esc(D.ce.name)}</h1><span class="cebadge">CE ${esc(D.ce.label||D.ce.id)}</span><span class="s hdate">${WINDOW} · 90 days${EN?' · English only':''}${PREVIEW_NEW?' · <b>Preview: how a new CE looks</b>':''} <span class="tip" title="${esc(`Hybrid cluster set. Pages are matched to clusters by focus keyword; ${n((D.pages_no_cluster||[]).length)} of ${n(nPages)} live pages match none.`)}">i</span></span></div>
    <span class="spacer"></span><button class="tbtn" data-edit aria-pressed="${S.edit}">${S.edit?'Done editing':'Edit clusters'}</button><button class="tbtn" data-layer="seeds">Seeds <i>${(()=>{const u=OPPS_().filter(o=>['unclaimed','unclustered'].includes(o.type)&&!oppState(o)).length;return u?`${n(u)} to place`:n(seedList().length)})()}</i></button><button class="tbtn" data-layer="changes">Changes <i>${n(S.log.length)}</i></button></div>
-   <nav class="vtabs" aria-label="Views"><button data-mode="analysis" aria-current="${!exec?'page':'false'}">Growth · decide</button><button data-mode="execution" aria-current="${exec?'page':'false'}">Content · build pages <i>${n(sentPages().length)}</i></button></nav>
+   <nav class="vtabs" aria-label="Views"><button data-mode="analysis" aria-current="${!exec?'page':'false'}">Growth · decide</button><button data-mode="execution" aria-current="${exec?'page':'false'}">Content · launched pages <i>${n(launchedRows().length)}</i></button></nav>
    <div class="tiles">${tiles.map(([l,v,s2,tt])=>`<div><div class="s">${l}</div><b>${v}</b><div class="s" title="${esc(tt||s2)}">${s2}</div></div>`).join('')}</div>
    `;
 }
@@ -2262,7 +2285,7 @@ function urlCell(c){if(OTHER(c))return '<span class="dim">–</span>';
   const link=(p,h0)=>urlBtn(p,esc(shortPath(p)),h0), land=landLine(c);
   if(c.pages.length){const mp=mainPage(c)||c.pages[0];return `<span class="cell">${link(pathOf(mp),pageHost(mp))}<span class="s lockt" title="Live page: changes happen in Payload, by content">${LOCK}live</span>${land}</span>`}
   if(picked&&picked!=='none'){const o=owner(picked);return `<span class="cell">${link(picked)}${note(`Covered by this live page · <button class="lnk s" data-pmapundo="${c.id}">Undo pick</button>`)}${o?mergeBtn(o):''}${land}</span>`}
-  const st=S.lstate[c.id]==='launched'?'<span class="pill ok">Launched</span>':S.lstate[c.id]==='flagged'?'<span class="pill warn">Supply flagged</span>':S.sentContent?.has(c.id)||S.pstat[c.id]?'<span class="pill acc">With content</span>':'';
+  const st=S.lstate[c.id]==='launched'?'<span class="pill acc">Recorded</span>':S.lstate[c.id]==='flagged'?'<span class="pill warn">Supply flagged</span>':S.sentContent?.has(c.id)||S.pstat[c.id]?'<span class="pill acc">With content</span>':'';
   if(st)return `<span class="cell"><span class="purl" title="${esc(slugOf(c))}">${esc(shortPath(slugOf(c)))}</span>${st}</span>`;
   const tog=sepToggle(c);
   if(ai.mapping==='needs_review'&&!picked&&!(c.id in S.sep)){const opts=[...livePaths()].sort(), lk=likelyPage(c), o=lk&&owner(lk.path);
@@ -2537,7 +2560,7 @@ function launchConfirmLayer(){const R=S.lrun, L=(R?R.ids:S.lconfirm).map(id=>byI
   const done=R&&R.i>=R.steps.length;
   return `<div class="lback"><div class="lbox${R?' running':''}" role="dialog" aria-label="Launch">
    <div class="lhead"><div><div class="s">Execution · ${esc(D.ce.name)} · ${NEW_CE?'New CE (no CE ID yet): the page planning sheet’s New CE steps':'Existing CE: the page planning sheet’s Existing CE steps'}</div><h2>${done?'Launched':R?'Launching':'Launch'} ${L.length===1?esc(nm(L[0])):`${n(L.length)} pages`}</h2></div><button class="x" data-lcancel aria-label="Close">×</button></div>
-   <p class="s">${R?(done?'Every step ran. Content picks up its part from the Content tab; Perf asks go once their pages are live and a product is on sale.':'The agent works through the plan and skips what already exists.'):'The agent creates only what is missing, in this order. Nothing is created until you launch.'}</p>
+   <p class="s">${R?(done?'Recorded. The page is on the Content tab. Until the Payload, entity and Perf APIs are connected, nothing is created yet.':'The agent works through the plan and skips what already exists.'):'Launch runs only what is missing, in this order. Until the Payload, entity and Perf APIs are connected, it records the plan and creates nothing.'}</p>
    <div class="${R?'lgrid':''}"><div>${L.map(c=>`<div class="plan"><b>${esc(nm(c))}</b> <span class="pill mute">${esc(pageTypeOf(c))}</span><ol class="lplan">${l5Plan(c).map(li).join('')}</ol></div>`).join('')}</div>
    ${R?`<aside class="lagent"><b class="s">Agent</b>${R.log.map(m=>`<p>${m}</p>`).join('')||'<p class="s">Starting…</p>'}</aside>`:''}</div>
    <div class="dfoot" style="justify-content:flex-end;gap:8px">${R?(done?'<button class="btn primary" data-lcancel>Done</button>':'<span class="s">Running…</span>'):`<button class="btn" data-lcancel>Cancel</button><button class="btn primary" data-lgo>Launch ${L.length>1?n(L.length)+' pages':''}</button>`}</div>
@@ -2879,6 +2902,7 @@ function render(){
   document.documentElement.style.setProperty('--bar',$('#head').offsetHeight+'px');
   if(S.mode==='opps'){S.mode='analysis';S.aview='opps'}
   $('#main').innerHTML=iconize(S.mode==='analysis'?analysisView():progressView());
+  {const tb=document.querySelector('table.ctbl'), st=tb&&tb.querySelector('tr.h th.sticky');if(st)tb.style.setProperty('--stk',st.offsetWidth+'px')}
   // Every table keeps its own scroll (the cluster table, content's queue, pages with no cluster).
   document.querySelectorAll('#main .tbox').forEach((b,i)=>{if(keep[i]){b.scrollLeft=keep[i].left;b.scrollTop=keep[i].top}});
   window.scrollTo(0,y);
@@ -2902,7 +2926,7 @@ function act(sel,el){
     S.parent[c.id]=to;logChange(to?`Put <b>${esc(nm(c))}</b> under ${esc(nm(byId[to]))}`:`Took <b>${esc(nm(c))}</b> out of ${esc(from?nm(byId[from]):'its parent')}`,()=>{if(was===undefined)delete S.parent[c.id];else S.parent[c.id]=was})}
 }
 document.addEventListener('click',e=>{
-  const t=e.target.closest('[data-kwopen],[data-pmapuse],[data-mergewith],[data-pmapnone],[data-pmapundo],[data-subdtog],[data-urladd],[data-sgo],[data-vmenu],[data-l5],[data-hold],[data-oppsend],[data-stall],[data-assignok],[data-askaside],[data-mode],[data-chip],[data-row],[data-close],[data-dtab],[data-dfilter],[data-ssort],[data-dfam],[data-dfamclear],[data-mergeok],[data-mergeno],[data-stf],[data-tocontent],[data-tocontentall],[data-pmark],[data-perfreview],[data-clearsaved],[data-leaveok],[data-leaveno],[data-cell],[data-ptheme],[data-pclear],[data-layer],[data-undo],[data-seedadd],[data-seeddel],[data-leaveadd],[data-leavedel],[data-rerun],[data-pagelaunch],[data-sendperf],[data-intentok],[data-intentno],[data-renameok],[data-renameno],[data-grp],[data-kwfam],[data-agopen],[data-pagepop],[data-pageclose],[data-launch],[data-lclose],[data-lstart],[data-lans],[data-lfinish],[data-oppc],[data-oppall],[data-oppok],[data-oppno],[data-opptype],[data-allgroups],[data-type],[data-sort],[data-psort],[data-par],[data-cmtadd],[data-cmtdel],[data-copy],[data-view],[data-pexp],[data-stab],[data-partneradd],[data-partnerdel],[data-edit],[data-mergesel],[data-delsel],[data-sepok],[data-sepset],[data-askok],[data-askundo],[data-sepundo],[data-oppundo],[data-aview],[data-oppbulk],[data-oppfilter],[data-gogate],[data-pcard],[data-kwall],[data-kwadd],[data-kwact],[data-kwaddopen],[data-kwbulkremove],[data-kwbulkclear],[data-renamestart],[data-kwsug],[data-uncnew],[data-uncleave],[data-threset],[data-flagundo],[data-flagmove],[data-reviewed],[data-send],[data-copypkg],[data-golaunch],[data-launchall],[data-flagsup],[data-lcancel],[data-lgo],[data-itype]');
+  const t=e.target.closest('[data-ctf],[data-kwopen],[data-pmapuse],[data-mergewith],[data-pmapnone],[data-pmapundo],[data-subdtog],[data-urladd],[data-sgo],[data-vmenu],[data-l5],[data-hold],[data-oppsend],[data-stall],[data-assignok],[data-askaside],[data-mode],[data-chip],[data-row],[data-close],[data-dtab],[data-dfilter],[data-ssort],[data-dfam],[data-dfamclear],[data-mergeok],[data-mergeno],[data-stf],[data-tocontent],[data-tocontentall],[data-pmark],[data-perfreview],[data-clearsaved],[data-leaveok],[data-leaveno],[data-cell],[data-ptheme],[data-pclear],[data-layer],[data-undo],[data-seedadd],[data-seeddel],[data-leaveadd],[data-leavedel],[data-rerun],[data-pagelaunch],[data-sendperf],[data-intentok],[data-intentno],[data-renameok],[data-renameno],[data-grp],[data-kwfam],[data-agopen],[data-pagepop],[data-pageclose],[data-launch],[data-lclose],[data-lstart],[data-lans],[data-lfinish],[data-oppc],[data-oppall],[data-oppok],[data-oppno],[data-opptype],[data-allgroups],[data-type],[data-sort],[data-psort],[data-par],[data-cmtadd],[data-cmtdel],[data-copy],[data-view],[data-pexp],[data-stab],[data-partneradd],[data-partnerdel],[data-edit],[data-mergesel],[data-delsel],[data-sepok],[data-sepset],[data-askok],[data-askundo],[data-sepundo],[data-oppundo],[data-aview],[data-oppbulk],[data-oppfilter],[data-gogate],[data-pcard],[data-kwall],[data-kwadd],[data-kwact],[data-kwaddopen],[data-kwbulkremove],[data-kwbulkclear],[data-renamestart],[data-kwsug],[data-uncnew],[data-uncleave],[data-threset],[data-flagundo],[data-flagmove],[data-reviewed],[data-send],[data-copypkg],[data-golaunch],[data-launchall],[data-flagsup],[data-lcancel],[data-lgo],[data-itype]');
   if(!t||e.target.closest('select,input'))return;const d=t.dataset;
   if(d.subdtog!==undefined){const c=byId[d.subdtog],had=c.id in S.subd,was=S.subd[c.id],to=!subdOn(c);S.subd[c.id]=to;
     logChange(`Subdomain for <b>${esc(nm(c))}</b>: ${to?esc(subdUrlOf(c)):'none'}`,()=>{if(had)S.subd[c.id]=was;else delete S.subd[c.id]})}
@@ -3052,6 +3076,7 @@ document.addEventListener('click',e=>{
   else if(d.chip){S.chip=S.chip===d.chip?null:d.chip;S.aview='clusters'}
   else if(d.cell){const id=t.closest('tr').dataset.row, col=ALLCOLS.find(x=>x[0]===d.cell);S.sel=id;S.layer=null;S.renaming=false;S.dtab=col[2];S.dq='';S.dfilter='all';S.dctx=d.cell==='own'?'theme':d.cell;S.pflt=null;
     if(d.cell==='own'&&byId[id].theme?.top)S.pflt={col:'theme',name:byId[id].theme.top}}
+  else if(d.ctf){S.ctf=d.ctf}
   else if(d.kwopen){S.sel=d.kwopen;S.layer=null;S.renaming=false;S.dtab='kwd';S.dfam=null;S.dq='';S.dfilter='all';S.dctx=null;S.pflt=null}
   else if(d.row){S.sel=d.row;S.layer=null;S.renaming=false;S.dtab='kw';S.dfam=null;S.dq='';S.dfilter='all';S.dctx=null;S.pflt=null}
   else if(d.sgo!==undefined){const cut=d.sgo.indexOf('|'),key=d.sgo.slice(0,cut),id=d.sgo.slice(cut+1),g=GROUPS.find(x=>x.main.concat(x.more).includes(key));if(g&&!g.main.includes(key)){S.open.add(g.id);saveOpen()}S.flash={id,key}}
