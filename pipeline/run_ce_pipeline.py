@@ -352,6 +352,13 @@ def export(ce, snap, state):
         keep = {"keywords": ["keyword", "vol"], "paid": ["search", "impr", "clicks", "spend", "conv", "conv_value"],
                 "organic": ["search", "clicks", "impressions", "avg_position", "top_page"]}[kind]
         a = a[[c for c in keep if c in a] + ["cluster", "confidence"]].rename(columns={"vol": "volume"})
+        if kind == "keywords":
+            # Jev places every keyword by meaning and knows nothing of the negative keywords, so a keyword naming a
+            # competitor is taken out of its cluster here. Paid and organic searches keep their cluster: they are
+            # clicks the CE's own ads and pages really got.
+            from harsha_to_clusters import claims, norm
+            neg = [norm(n) for n in negatives(ce)]
+            a.loc[a["keyword"].map(lambda k: any(claims(n, norm(str(k))) for n in neg)), "cluster"] = None
         a.insert(0, "ce", ce)
         a.to_csv(fin / f"{kind}.csv", index=False)
         out[kind] = a
