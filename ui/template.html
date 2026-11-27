@@ -400,6 +400,11 @@ input[type="checkbox"]:focus-visible{outline:2px solid var(--accent);outline-off
 .isel.set{color:var(--accent-ink);border-color:var(--accent)}
 .ptab td{vertical-align:middle}
 /* Vendor names run long ("phuket new generation travel (pnt phuket)"): they wrap rather than being cut off. */
+.segg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.segb{font:inherit;font-size:12px;line-height:16px;padding:2px 10px;border:0;background:var(--bg);color:var(--fg3);cursor:pointer}.segb.on{background:var(--accent);color:#fff;font-weight:600}.segb:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.seprow{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.ptag{font-size:11px;line-height:14px;border-radius:4px;padding:1px 5px;background:#eef3ff;color:#1f4fbf;font-weight:600;white-space:nowrap}.ptag.chg{background:#fff1e0;color:#8a4500}
+.lab{display:block;font-size:11px;line-height:14px;color:var(--fg3);margin-top:4px}.lockt{display:inline-flex;align-items:center;gap:4px;color:var(--fg3)}.lockic{flex:none}
+.lent{display:flex;flex-direction:column;align-items:center;gap:2px;width:100%}.lent .esel{max-width:180px}
+.nudge{display:flex;align-items:center;gap:12px;margin:0 0 10px;padding:10px 14px;background:#fff8e5;border:1px solid #f1dca4;border-radius:10px;font-size:var(--t-small);color:#3d2c00}.nudge span{flex:1}
 .purl{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,monospace;font-size:12px;white-space:nowrap}.lcell{min-width:0;width:100%}.lrow{display:flex;gap:6px;align-items:baseline;max-width:100%;min-width:0;white-space:nowrap}.lrow>a{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lrow>.s,.lrow>button{flex:none}.pdiff{font-size:11px;color:var(--warn);cursor:help;white-space:nowrap}select.pmsel{max-width:100%;font-size:11px;margin-top:2px}.lcell .pglink,.cell .url{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}.purl input.pname{height:auto;min-height:0;line-height:inherit;box-shadow:none;font:inherit;color:var(--fg);border:0;border-bottom:1px dashed var(--line);border-radius:0;background:transparent;padding:0;margin:0;width:auto;outline:none}.purl input.pname:focus{border-bottom-color:var(--accent,#8000ff)}.pmrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .ptab .pname{white-space:normal;overflow-wrap:anywhere;line-height:1.3}
 .ptab .isel{width:100%;max-width:none}
@@ -1051,21 +1056,27 @@ function entSlot(c,kind){
   return{...base,state:c.pages.length?'gap':'new'}}
 const entNeeded=c=>['coll','poi'].some(k=>{const s=entSlot(c,k);return s.need&&s.state!=='none'});
 const entOk=c=>['coll','poi'].every(k=>{const s=entSlot(c,k);return !s.need||['found','created','none'].includes(s.state)});
-function entPick(c,s,label){
-  const L=CE_ENTS().filter(e=>e.type===s.type), what=s.type==='poi'?'POI':'collection';
-  const opts=L.map(e=>`<option value="${esc(String(e.id))}"${String(e.id)===String(s.id)?' disabled':''}>${esc(String(e.id))} · ${esc(e.name)}${e.active===false&&e.type==='collection'?' (inactive)':''}</option>`).join('');
-  const extra=[s.state!=='new'&&s.state!=='created'?`<option value="__new">+ Create new ${what}</option>`:'',
-    s.state!=='none'?'<option value="__none">Not needed</option>':'',S.ent[s.key]!==undefined?'<option value="__auto">Back to the filled-in answer</option>':''].join('');
-  return `<select class="esel" data-entpick="${s.key}" aria-label="${label} ${what} for ${esc(nm(c))}"><option value="">${label} ▾</option>${opts}${extra}</select>`}
-function entLine(c,kind){const s=entSlot(c,kind), L=kind==='coll'?'Collection':'POI', ns=t=>`<span class="s">${t}</span>`;
-  if(s.state==='found')return['done',`${L}: ${s.id}${s.name?' · '+s.name:''}`,ns(s.how==='page'?'from its page':s.how==='name'?'matched by name · check':'picked by you')+entPick(c,s,'Change')];
-  if(s.state==='created')return['done',`${L}: created`,s.by?ns('asked by you'):''];
-  if(s.state==='none')return['na',`${L}: not needed`,s.by?ns('set by you')+entPick(c,s,'Change'):`<button class="lnk s" data-entset="${s.key}|new">Create anyway</button>`];
-  if(s.state==='gap')return['warn',`${L}: none · its page lists the CE collection`,entPick(c,s,'Pick')+`<button class="lnk s" data-entset="${s.key}|new">Create new</button>`];
-  return['todo',`${L}: to create on Launch`,ns(s.by?'asked by you':kind==='coll'?`type keyword, under ${esc(String(D.ce.id))}`:"under the CE's POI")+entPick(c,s,'Pick')]}
+// Setup status only reports what the page type requires and what exists; the choices sit with Launch (entChoice).
+function entLine(c,kind){const s=entSlot(c,kind), L=kind==='coll'?'Collection':'POI', req=s.need?'required, ':'';
+  if(s.state==='found')return['done',`${L}: ${req}${s.id}${s.name?' · '+s.name:''}${s.how==='page'?' (from its page)':s.how==='name'?' (matched by name)':' (picked)'}`];
+  if(s.state==='created')return['done',`${L}: created`];
+  if(s.state==='none')return['na',`${L}: ${s.by?'not needed, set by you':'not required'}`];
+  if(s.state==='gap')return['warn',`${L}: required, none yet${kind==='coll'?'; its page lists the CE collection':''}`];
+  return['todo',`${L}: required, created on Launch`]}
 function entLines(c){const a=entSlot(c,'coll'),b=entSlot(c,'poi');
-  if(a.state==='none'&&b.state==='none'&&!a.by&&!b.by)return[['na','Entity: not needed',`<select class="esel" data-entpick="${c.id}|any" aria-label="Create an entity anyway for ${esc(nm(c))}"><option value="">Create anyway ▾</option><option value="coll">A child collection</option><option value="poi">A POI</option></select>`]];
-  return[entLine(c,'coll'),entLine(c,'poi')]}
+  if(a.state==='none'&&b.state==='none'&&!a.by&&!b.by)return[['na','Entity: not required']];
+  return[['coll',a],['poi',b]].filter(([,s])=>s.state!=='none'||s.by).map(([k])=>entLine(c,k))}
+/* The Collection or POI choice next to Launch, only where the page planning sheet requires one: the CE's entities of
+   that type, a new child one, or not needed. */
+function entChoice(c,kind){const s=entSlot(c,kind);if(!s.need)return '';
+  const what=kind==='coll'?'Collection':'POI';
+  if(s.state==='created')return `<span class="s">${what}: created</span>`;
+  const L=CE_ENTS().filter(e=>e.type===s.type), cur=s.state==='found'?String(s.id):s.state==='none'?'__none':'__new';
+  const opts=L.map(e=>`<option value="${esc(String(e.id))}" ${cur===String(e.id)?'selected':''}>${esc(String(e.id))} · ${esc(e.name)}${e.active===false&&e.type==='collection'?' (inactive)':''}</option>`);
+  if(s.state==='found'&&!L.some(e=>String(e.id)===cur))opts.unshift(`<option value="${esc(cur)}" selected>${esc(cur)}${s.name?' · '+esc(s.name):''}</option>`);
+  opts.push(`<option value="__new" ${cur==='__new'?'selected':''}>+ Create child ${kind==='coll'?'collection':'POI'}</option>`,`<option value="__none" ${cur==='__none'?'selected':''}>Not needed</option>`);
+  const note=s.state==='found'?(s.how==='name'?'matched by name · check':s.how==='page'?'from its page':'picked by you'):s.state==='gap'?'none yet':'';
+  return `<span class="lent"><span class="lab">${what}</span><select class="isel esel" data-entpick="${c.id}|${kind}" aria-label="${what} for ${esc(nm(c))}">${opts.join('')}</select>${note?`<span class="s">${note}</span>`:''}</span>`}
 
 /* ---------- Metric definitions, read by header tooltips ---------- */
 const G={
@@ -1084,11 +1095,11 @@ const G={
  cvr:['CVR','Google Ads conversions ÷ paid clicks, 90 days. Each keyword\'s conversions are split over clusters the way its CM1 is.','Google Ads keywords'],
  roi:['Paid ROI','Google Ads conversion value ÷ spend. Under 100% loses money; 140% is the target.','Google Ads'],
  ptype:['Page type','The page type from the cluster-to-page mapping prompt. It decides the entities and whether content reviews the page. Click to change; content checks it here before launch.','Page mapping'],
- url:['Page','The cluster’s page. Live: an existing page (matched by the page_mapping prompt, or picked). Planned: the URL its page type gets under the MB URL guidelines, only the name part editable. Needs review: the page_mapping prompt was not sure an existing page covers it. The subdomain sits under it.','Payload, page prompts, MB URL guidelines'],
+ url:['Page URL','A live page shows its URL, locked (changes happen in Payload), and where its ads land. Otherwise Separate page: Yes or No, filled in by the separate_page prompt (auto) or by you (changed). Yes opens the subfolder and, for page types that get one, the subdomain. Page mapping unsure: the page_mapping prompt was not sure an existing page covers it.','Payload, page prompts, MB URL guidelines'],
  page:['Ads land on','Where the cluster\'s paid clicks land, estimated: the landing pages of the ad groups that served its searches, each weighted by its share of that ad group\'s clicks. Warns when a buying cluster with 20+ clicks has its own page but under half its clicks land there.','Google Ads landing pages and search terms (BigQuery)'],
- status:['Current status','What is wrong with the cluster, first rule that applies: Supply thin (no unique experience on sale), Not set up (own page chosen, no page yet), No traffic (under 100 paid clicks or coverage below its bar), Underperforming (ROI more than 5 points under its campaigns\' target, or under 100%), Working. Content clusters: page live or not.','Supply, pages, Google Ads'],
+ status:['Ads status','What is wrong with the cluster, first rule that applies: Supply thin (no unique experience on sale), Not set up (own page chosen, no page yet), No traffic (under 100 paid clicks or coverage below its bar), Underperforming (ROI more than 5 points under its campaigns\' target, or under 100%), Working. Content clusters: page live or not.','Supply, pages, Google Ads'],
  lnch:['Launch','One Launch takes the cluster all the way: supply (growth or the BDM add an experience), the page (set up now when content need not review its page type, otherwise in the CE\'s Send to content), and its Perf ask, sent to Perf\'s tool once the page is live. After it, the cell says who the cluster waits on. Hold keeps a cluster out.','Your call'],
- setup:['Set-up','The launch steps: page type, Headout entity (collection, POI), MB page, experiences on sale, own ad group.','Payload, Headout entities, Google Ads'],
+ setup:['Setup status','What the cluster needs and what already exists: experiences on sale, the Headout entities its page type requires (page planning sheet), its microbrand page and its own ad group. It only reports; every choice and change is made with Launch.','Payload, Headout entities, Google Ads'],
  launch:['Launch','Page types whose entities follow from the type launch in one click; the rest go to content to check the page type first.','Page planning rules'],
  dstack:['Own page · Launch','',''],
  prod:['Supply','Buying clusters. Unique · available: experiences matched to this intent are on sale (with how many). Covered · on sale: no product of its own, but its page sells ones that serve it. Otherwise growth sets it: covered by a broader product (a part of the site the main ticket includes), unique experience with supply coming, or unique experience with no supply.','Experience matching + orders + Payload pages'],
@@ -1136,7 +1147,7 @@ const volNum=c=>c.vol==null?'–':c.vol_source==='impressions'?`<span class="est
 const VOLMAX=Math.max(1,...C.filter(c=>!OTHER(c)).map(c=>c.vol||0));
 const volBar=c=>`style="--w:${Math.round(Math.sqrt((c.vol||0)/VOLMAX)*100)}%"`;
 // Square-root scale so the long tail stays visible next to the head term.
-const volCell=c=>`<span class="cell num"><span>${volNum(c)}</span><i class="vbar" ${volBar(c)} aria-hidden="true"></i>${c.focus_kw?`<span class="s" title="Focus keyword: ${esc(c.focus_kw)}">${esc(focusLabel(c))}</span>`:''}</span>`;
+const volCell=c=>`<span class="cell num"><span>${volNum(c)}</span><i class="vbar" ${volBar(c)} aria-hidden="true"></i>${c.focus_kw?`<span class="s" title="Focus keyword: ${esc(c.focus_kw)}">${esc(focusLabel(c))}</span>`:''}${OTHER(c)?'':`<button class="lnk s" data-kwopen="${c.id}" title="Open its keyword list">${n(kwCount(c))} keyword${kwCount(c)===1?'':'s'}</button>`}</span>`;
 // Coverage as a number with a status dot, not a bar: paid impressions come from every language's campaigns while searches
 // are English keyword volume, so values pass 100% and a length scale would overstate them. Green at or above the CE's
 // bar (Perf thresholds), amber below; small clusters under the search minimum are never flagged.
@@ -1299,7 +1310,7 @@ function setupSteps(c){
     L.push(...entLines(c))}
   const mp=mainPage(c);
   L.push(c.pages.length?['done',`MB page: live, ${pathOf(mp||c.pages[0])}`]:ls==='launched'?['done','MB page: launched']:ls==='queued'?['now','MB page: launching']
-    :S.sentContent?.has(c.id)?['now','MB page: with content']:sepOf(c)==='yes'?['todo','MB page: none']:['na','MB page: none needed']);
+    :S.sentContent?.has(c.id)?['now','MB page: with content']:sepOf(c)==='yes'?['todo','MB page: to create']:pageUndecided(c)?['todo','MB page: page not decided']:['na','MB page: none needed']);
   if(TR(c)&&HASPAID){const sh=ownAgShare(c), a=c.adg||{};
     L.push(sh>=.5?['done',`Ad group: own, ${pct(sh)} of clicks`]:a.state==='focus'?['warn','Ad group: focus keyword only']:a.ag?['warn',`Ad group: exists, ${pct(sh)} of clicks`]:['todo','Ad group: none of its own'])}
   return L}
@@ -1344,30 +1355,44 @@ const l5Steps=c=>{if(OTHER(c))return[];const st=[];if(l5NeedsSupply(c))st.push('
 function l5Stage(c){
   if(!l5L(c))return null;
   if(S.perfAt[c.id])return{t:'Launched',k:'acc',n:`Perf asked ${fmtD(S.perfAt[c.id])}`};
-  if(l5NeedsPage(c))return{t:'Launched',k:'acc',n:S.sentContent?.has(c.id)?`page with content since ${fmtD(S.contentAt[c.id]||l5L(c).at)}`:`page in Payload's list since ${fmtD(l5L(c).at)}`};
-  if(l5Ask(c))return c.pages.length?{t:'Launched',k:'acc',n:'Perf ask goes on release'}:{t:'Launched',k:'acc',n:'Perf is asked once the page is live'};
+  // Missing supply never stops a launch; only the Perf ask waits for it (26 Nov).
+  const wait=TR(c)&&!prodState(c).yes&&l5Ask(c);
+  if(l5NeedsPage(c))return{t:'Launched',k:'acc',n:(S.sentContent?.has(c.id)?`page with content since ${fmtD(S.contentAt[c.id]||l5L(c).at)}`:`page in Payload's list since ${fmtD(l5L(c).at)}`)+(wait?'; Perf ask waits for supply':'')};
+  if(l5Ask(c))return wait?{t:'Launched',k:'acc',n:'Perf ask waits for supply'}:c.pages.length?{t:'Launched',k:'acc',n:'Perf ask goes on release'}:{t:'Launched',k:'acc',n:'Perf is asked once the page is live'};
   return{t:'Live',k:'ok',n:''}}
 /* What stops a Launch (Krupa, 19 Nov: no Hold; anything that cannot launch says why and how to fix it). */
 function l5Blocked(c){if(OTHER(c)||l5L(c)||!l5Steps(c).length)return null;
-  if(TR(c)&&!prodState(c).yes)return{why:'no product on sale',fix:`<button class="lnk s" data-sgo="prod|${c.id}">Set supply</button>`};
   const tk=l5NeedsPage(c)&&slugTaken(c);if(tk)return{why:`URL used by ${esc(tk)}`,fix:`<button class="lnk s" data-sgo="url|${c.id}">Change the URL</button>`};
   return null}
+// A buying cluster with no page whose page question nobody has answered: neither page prompt gave a yes or no, and no
+// one has picked a page or answered Separate page.
+const pageUndecided=c=>TR(c)&&!OTHER(c)&&!c.pages.length&&!l5L(c)&&!S.lstate[c.id]&&!(S.pmap[c.id]&&S.pmap[c.id]!=='none')&&!(c.id in S.sep)&&!suggestSep(c);
+function l5Caption(c,st){const P=[], ent=['coll','poi'].filter(k=>{const s=entSlot(c,k);return s.need&&['gap','new'].includes(s.state)});
+  if(ent.length)P.push(`creates the ${ent.map(k=>k==='coll'?'child collection':'child POI').join(' and ')}`);
+  if(st.includes('page'))P.push('sets up the page');
+  if(st.includes('content'))P.push(`sends the page to content: ${contentWhy(pageTypeOf(c))}`);
+  if(st.includes('supply'))P.push('the Perf ask waits for supply');
+  else if(st.includes('perf'))P.push(c.pages.length?'asks Perf to land its ads here':'asks Perf once the page is live');
+  return P.join('; ')}
 function lnchCell(c){
   if(OTHER(c))return '<span class="dim">–</span>';
   const ch=(t,k,n2)=>`<span class="lcell"><span class="stchip st-${k}">${t}</span>${n2?`<span class="s">${n2}</span>`:''}</span>`;
   const st=l5Stage(c);if(st)return ch(st.t,st.k,st.n);
   const b=l5Blocked(c);if(b)return `<span class="lcell"><span class="stchip st-bad">Blocked</span><span class="s">${b.why}</span>${b.fix}</span>`;
-  if(!TR(c)&&!c.pages.length)return S.sentContent?.has(c.id)?ch('With content','acc',S.contentAt[c.id]?`sent ${fmtD(S.contentAt[c.id])}`:''):l5Ask(c)?`<span class="lcell"><button class="btn sm primary" data-l5="${c.id}" aria-label="Launch ${esc(nm(c))}">Launch</button></span>`:ch('In Send to content','mute','');
-  if(!l5Steps(c).length)return ch(c.pages.length?'Live':TR(c)?'Nothing to launch':'Page live',c.pages.length?'ok':'mute','');
-  return `<span class="lcell"><button class="btn sm primary" data-l5="${c.id}" aria-label="Launch ${esc(nm(c))}">Launch</button></span>`}
+  if(pageUndecided(c))return `<span class="lcell"><button class="btn sm" disabled aria-label="Launch ${esc(nm(c))}: decide the page first">Launch</button><span class="s">decide the page first</span></span>`;
+  if(!TR(c)&&!c.pages.length)return S.sentContent?.has(c.id)?ch('With content','acc',S.contentAt[c.id]?`since ${fmtD(S.contentAt[c.id])}`:''):l5Ask(c)?`<span class="lcell"><button class="btn sm primary" data-l5="${c.id}" aria-label="Launch ${esc(nm(c))}">Launch</button></span>`:ch("Content's call",'mute','');
+  const steps=l5Steps(c);
+  if(!steps.length)return c.pages.length?ch('Live','ok','changes go through Payload'):ch('Nothing to launch','mute','no page of its own');
+  return `<span class="lcell"><button class="btn sm primary" data-l5="${c.id}" aria-label="Launch ${esc(nm(c))}">Launch</button><span class="s">${l5Caption(c,steps)}</span>${['coll','poi'].map(k=>entChoice(c,k)).join('')}</span>`}
 /* The agent plan Launch shows, in order: what it runs now and what it queues for content and Perf. */
 function l5Plan(c){const st=l5Steps(c),pt=pageTypeOf(c),a=l5Ask(c),L=[];
   if(st.includes('supply'))L.push('Ask growth or the BDM to add an experience (automatic once keyword-collection matching lands)');
   if(st.includes('entity')){bizSteps(c).forEach(x=>L.push(x));((ENT[pageTypeOf(c)]||FAM.info).steps.mbFolder||[]).forEach(x=>L.push(esc(x)))}
   if(st.includes('page'))planOf(c).filter(x=>!/^Content brief/.test(x)).forEach(x=>L.push(x));
-  if(st.includes('page'))L.push(`Queue the draft for the next Send to content${st.includes('supply')?', once it has a product':''}: ${esc(planOf(c).find(x=>/^Content brief/.test(x)).replace(/^Content brief: /,''))}`);
-  if(st.includes('content'))L.push(`Queue for the next Send to content: ${esc(ptLabel(pt))}, ${contentWhy(pt)}${st.includes('supply')?', once it has a product':''}`);
-  if(st.includes('perf'))L.push(c.pages.length?`Send the Perf ask to Perf's tool: ${askTitle(c,a)}`:`Queue the Perf ask for when the page is live: ${String(askTitle(c,a)).replace(/ once its page is live/i,'')}`);
+  if(st.includes('page'))L.push(`Add the page to the Content tab for content: ${esc(planOf(c).find(x=>/^Content brief/.test(x)).replace(/^Content brief: /,''))}`);
+  if(st.includes('content'))L.push(`Add the page to the Content tab: ${esc(ptLabel(pt))}, ${contentWhy(pt)}`);
+  if(st.includes('perf'))L.push(st.includes('supply')?`Hold the Perf ask until a product is on sale, then send it on its own: ${String(askTitle(c,a)).replace(/ once its page is live/i,'')}`
+    :c.pages.length?`Send the Perf ask to Perf's tool: ${askTitle(c,a)}`:`Queue the Perf ask for when the page is live: ${String(askTitle(c,a)).replace(/ once its page is live/i,'')}`);
   return L}
 const toContentWaiting=()=>live().filter(c=>l5L(c)&&l5NeedsPage(c)&&!S.sentContent?.has(c.id));
 const notLaunched=()=>live().filter(c=>!l5L(c)&&l5NeedsPage(c));
@@ -1560,9 +1585,9 @@ const ALLCOLS=[
 /* First view (5 Nov, Krupa and Perf): one table for growth and content with five columns; paid and organic depth is
    one click away in its group or the side panel. */
 const GROUPS=[
- {id:'state',name:'Current status',main:['status','setup'],more:[]},
- {id:'demand',name:'Demand',main:['vol'],more:['nkw']},
- {id:'page',name:'Page',main:['ptype','url'],more:['page','ent','rank','rev','share']},
+ {id:'state',name:'Status',main:['status','setup'],more:[]},
+ {id:'demand',name:'Demand',main:['vol'],more:[]},
+ {id:'page',name:'Page',main:['ptype','url'],more:['ent','rank','rev','share']},
  {id:'prod',name:'Supply',main:['prod'],more:[]},
  {id:'paid',name:'Paid',main:['cov','own'],more:['clicks','roi','wow','cvr','cpc','rpc','spend','impr','prev','cm1','cm1o','aimax','qs','shown','tkw','wroi']},
  {id:'next',name:'Launch',main:['lnch'],more:[]}];
@@ -2089,10 +2114,14 @@ function toolbarRow(){const cnt=f=>live().filter(f).length, nO=OPPS_().filter(o=
 function statusBar(){const q=S.q.toLowerCase(), L=live().filter(c=>!OTHER(c)&&(!S.types.size||S.types.has(typeOf(c)))&&(!q||nm(c).toLowerCase().includes(q)||kwOf(c).some(w=>w.kw.includes(q))));
   const cnt={};L.forEach(c=>{const x=statusOf(c);if(x)cnt[x.k]=(cnt[x.k]||0)+1});
   const keys=Object.keys(ST).filter(k2=>cnt[k2]||['nosetup','supply','traffic','under','ok'].includes(k2)&&L.some(TR));
-  const N=toContentReady().length+contentNoPage().length, H=toContentHeld().length, again=!!S.sentContent?.size;
-  return `<div class="stbar"><div class="stchips"><b class="gtitle">Status</b>${keys.map(k2=>`<button class="chip stf st-${ST[k2][1]}${cnt[k2]?'':' zero'}" data-stf="${k2}" aria-pressed="${S.stf===k2}"><span class="stchip st-${ST[k2][1]}">${ST[k2][0]}</span><b>${n(cnt[k2]||0)}</b></button>`).join('')}${S.stf||S.chip?`<button class="lnk s" data-stf="">Show all</button>`:''}
+  return `${unmappedNudge()}<div class="stbar"><div class="stchips"><b class="gtitle">Ads status</b>${keys.map(k2=>`<button class="chip stf st-${ST[k2][1]}${cnt[k2]?'':' zero'}" data-stf="${k2}" aria-pressed="${S.stf===k2}"><span class="stchip st-${ST[k2][1]}">${ST[k2][0]}</span><b>${n(cnt[k2]||0)}</b></button>`).join('')}${S.stf||S.chip?`<button class="lnk s" data-stf="">Show all</button>`:''}
    <button class="lnk s" data-chip="auto" aria-pressed="${S.chip==='auto'}" title="Own page, supply and the Perf asks were filled in by the tool; this shows the clusters to check">Filled in for you · check</button></div>
-   <span class="spacer"></span><span class="stsend">${N||H?`<button class="btn primary" data-layer="tocontent">Send to content · ${n(N)}${again?' new':''}</button><span class="s">1 ticket for the CE${H?` · ${n(H)} held: no product`:''}</span>`:`<span class="s">${again?'Nothing new for content':'Nothing for content yet'}</span>`}</span></div>`}
+</div>`}
+/* Live pages no cluster holds, as a nudge on the first screen: every page needs a cluster before it syncs to Payload.
+   The list itself is in the Content tab. */
+function unmappedNudge(){const L=noClusterPages().filter(x=>!(x.i in S.pageMap)).sort((a,b)=>(b.revenue||0)-(a.revenue||0));if(!L.length)return '';
+  const top=L.slice(0,3).map(x=>`${esc(pathOf(x))}${x.revenue?` (${usd(x.revenue)})`:''}`).join(', ');
+  return `<div class="nudge"><span><b>${n(L.length)} live page${L.length===1?' has':'s have'} no cluster:</b> ${top}${L.length>3?` and ${n(L.length-3)} more`:''}. Every page needs a cluster before it syncs to Payload.</span><button class="btn sm" data-mode="execution">Map them</button></div>`}
 function toContentLayer(){const L=toContentReady(), Hd=toContentHeld(), M=contentNoPage().sort((a,b)=>(b.vol||0)-(a.vol||0)), NL=notLaunched();
   return `<div class="scrim" data-close></div><aside class="drawer" role="dialog" aria-modal="true" aria-label="Send to content">
    <header><div><div class="s">${esc(D.ce.name)}</div><h2>Send to content · ${n(L.length+M.length)}</h2></div><button class="x" data-close aria-label="Close">×</button></header>
@@ -2183,7 +2212,10 @@ const PAGE_TYPES=Object.keys(ENT);
 /* Page type and page URL (Krupa, 19 Nov): filled in, read like text, edited only when someone clicks. The URL is the
    own-page answer: a live page shows its path, a planned one a suggested slug, none means no page is planned. */
 const ptMapped=c=>!!(S.ptype[c.id]||pageTypes()[c.id]);
+const LOCK='<svg class="lockic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
 function ptypeCell(c){if(OTHER(c))return '<span class="dim">–</span>';const pt=pageTypeOf(c);
+  // A live page is changed in Payload, by content, so its page type is not edited here.
+  if(c.pages.length)return `<span class="cell"><span class="lockt" title="Live page: its page type changes in Payload">${LOCK}${esc(ptLabel(pt))}</span></span>`;
   return `<span class="cell"><select class="plainsel" data-ptype="${c.id}" aria-label="Page type for ${esc(nm(c))}" title="Click to change">${PAGE_TYPES.map(x=>`<option value="${esc(x)}" ${pt===x?'selected':''}>${esc(ptLabel(x))}</option>`).join('')}</select>${ptMapped(c)?'':'<span class="s warn">none mapped: check</span>'}</span>`}
 const subdOn=c=>c.id in S.subd?!!S.subd[c.id]:!c.pages.length&&!!(ENT[pageTypeOf(c)]||{}).subd;
 // A planned URL another page or cluster already uses cannot launch as it is.
@@ -2196,28 +2228,39 @@ function likelyPage(c){const want=new Set([...words(nm(c)),...words(focusLabel(c
   const pages=[...C.filter(x=>!OTHER(x)).flatMap(x=>x.pages.map(p=>({path:pathOf(p),text:pathOf(p).replace(/[\/-]/g,' ')}))),
                ...(D.pages_no_cluster||[]).map(p=>({path:pathOf(p),text:pathOf(p).replace(/[\/-]/g,' ')+' '+(p.focus||'')}))];
   let best=null;pages.forEach(p=>{const hit=[...words(p.text)].filter(w=>want.has(w)).length;if(hit&&(!best||hit>best.hit))best={...p,hit}});return best}
+/* Where the cluster's paid clicks land, as one line in the Page URL cell: on its own page, or somewhere else. Estimated
+   from the landing pages of the ad groups that served its searches. */
+function landLine(c){if(!HASPAID)return '';const L=landOf(c);if(!L||!(c.clicks||0))return '';
+  const where=isHome(L.path)?'home':shortPath(L.path), tip=`${pct(L.share)} of its ${n(c.clicks)} paid clicks land on ${isHome(L.path)?'the home page':L.path}. Estimated from the ad groups that served its searches.`;
+  if(!c.pages.length)return `<span class="s" title="${esc(tip)}">Ads land on ${esc(where)} today · ${pct(L.share)}</span>`;
+  if(L.own&&L.onOwn>=.5)return `<span class="s ok" title="${esc(tip)}">Ads land here · ${pct(L.onOwn)}</span>`;
+  return `<span class="s${landsOff(c)?' warn':''}" title="${esc(tip)}">Ads land on ${esc(where)} · ${pct(L.share)}; here ${pct(L.onOwn||0)}</span>`}
+/* Separate page Yes / No: its own saved answer (S.sep), filled in by the separate_page prompt and tagged auto; an answer
+   someone picks that differs from the prompt is tagged changed. */
+function sepToggle(c){const ai=(c.page_ai||{}).separate_page, v=sepOf(c), mine=c.id in S.sep;
+  const tag=mine?(['yes','no'].includes(ai)&&S.sep[c.id]!==ai?`<span class="ptag chg" title="The separate_page prompt said ${SEP_L[ai]}">changed · prompt said ${SEP_L[ai]}</span>`:['yes','no'].includes(ai)?'<span class="ptag">auto</span>':`<span class="ptag chg">set by you${ai==='not_sure'?' · prompt not sure':''}</span>`)
+    :v?`<span class="ptag" title="${esc(sepReason(c))}">auto</span>`:`<span class="s warn">${ai==='not_sure'?'prompt not sure: pick one':'pick one'}</span>`;
+  const b=x=>`<button class="segb${v===x?' on':''}" data-sepset="${c.id}:${x}" aria-pressed="${v===x}">${SEP_L[x]}</button>`;
+  return `<span class="seprow"><span class="s">Separate page</span><span class="segg" role="group" aria-label="Separate page for ${esc(nm(c))}">${b('yes')}${b('no')}</span>${tag}</span>`}
 function urlCell(c){if(OTHER(c))return '<span class="dim">–</span>';
-  const sd=subdOn(c), subLine=sd?`<span class="sdrow"><span class="s">Subdomain</span><input class="plainin" data-subdurl="${c.id}" value="${esc(subdUrlOf(c))}" aria-label="Subdomain for ${esc(nm(c))}" title="Suggested from its focus keyword. Click to edit; clear it to go back to the suggestion"></span><button class="lnk s" data-subdtog="${c.id}" aria-label="Remove the subdomain">Remove subdomain</button>`:`<button class="lnk s" data-subdtog="${c.id}">+ subdomain</button>`;
   const picked=S.pmap[c.id], ai=c.page_ai||{}, note=(txt,cls='',tip='')=>`<span class="s${cls}"${tip?` title="${esc(tip)}"`:''}>${txt}</span>`;
-  // A saved own-page choice that differs from the separate_page prompt: a small marker, the detail on hover.
-  const aiS=ai.separate_page, diff=c.id in S.sep&&aiS&&S.sep[c.id]!==aiS?` <span class="pdiff" title="You set own page to ${S.sep[c.id]}; the separate_page prompt said ${aiS==='not_sure'?'not sure':aiS}">≠ prompt</span>`:'';
   const owner=p=>C.find(x=>x.id!==c.id&&!OTHER(x)&&x.pages.some(q=>normPath(pathOf(q))===normPath(p)));
   const mergeBtn=o=>`<button class="lnk s" data-mergewith="${c.id}|${o.id}" title="Same page and the same searches as ${esc(nm(o))}">Merge with ${esc(nm(o))}</button>`;
-  const link=(p,h0)=>urlBtn(p,esc(shortPath(p)),h0);
-  if(c.pages.length){const mp=mainPage(c)||c.pages[0];return `<span class="cell">${link(pathOf(mp),pageHost(mp))}${note('Live')}${subLine}</span>`}
-  if(picked&&picked!=='none'){const o=owner(picked);return `<span class="cell">${link(picked)}${note(`Live · <button class="lnk s" data-pmapundo="${c.id}">Undo pick</button>`)}${o?mergeBtn(o):''}</span>`}
+  const link=(p,h0)=>urlBtn(p,esc(shortPath(p)),h0), land=landLine(c);
+  if(c.pages.length){const mp=mainPage(c)||c.pages[0];return `<span class="cell">${link(pathOf(mp),pageHost(mp))}<span class="s lockt" title="Live page: changes happen in Payload, by content">${LOCK}live</span>${land}</span>`}
+  if(picked&&picked!=='none'){const o=owner(picked);return `<span class="cell">${link(picked)}${note(`Covered by this live page · <button class="lnk s" data-pmapundo="${c.id}">Undo pick</button>`)}${o?mergeBtn(o):''}${land}</span>`}
   const st=S.lstate[c.id]==='launched'?'<span class="pill ok">Launched</span>':S.lstate[c.id]==='flagged'?'<span class="pill warn">Supply flagged</span>':S.sentContent?.has(c.id)||S.pstat[c.id]?'<span class="pill acc">With content</span>':'';
   if(st)return `<span class="cell"><span class="purl" title="${esc(slugOf(c))}">${esc(shortPath(slugOf(c)))}</span>${st}</span>`;
+  const tog=sepToggle(c);
   if(ai.mapping==='needs_review'&&!picked&&!(c.id in S.sep)){const opts=[...livePaths()].sort(), lk=likelyPage(c), o=lk&&owner(lk.path);
-    const pick=`<select class="isel pmsel" data-pmap="${c.id}" aria-label="Existing page for ${esc(nm(c))}"><option value="">${lk?'Other…':'Pick a page'}</option><option value="__none">None covers it</option>${opts.map(p=>`<option value="${esc(p)}">${esc(shortPath(p))}</option>`).join('')}</select>`;
-    return `<span class="cell">${lk?`<span class="lrow">${link(lk.path)}<button class="lnk s" data-pmapuse="${c.id}|${esc(lk.path)}">Use</button></span>`:''}${note(lk?'Likely page · review':'Review: a page may cover it',' warn',"The page_mapping prompt was not sure an existing page covers this cluster")}${o&&o.vol===c.vol?mergeBtn(o):''}${pick}</span>`}
-  const sep=sepOf(c);
-  if(sep==='no')return `<span class="cell"><span class="dim">No own page</span><span class="s"><button class="lnk s" data-urladd="${c.id}">Ask for one</button>${diff}</span></span>`;
-  if(sep!=='yes')return `<span class="cell"><span class="purl dim" title="${esc(slugOf(c))}">${esc(shortPath(slugOf(c)))}</span><span class="s">Own page? <button class="lnk s" data-urladd="${c.id}">Yes</button> · <button class="lnk s" data-sepset="${c.id}:no">No</button></span></span>`;
-  const taken=slugTaken(c), base=slugOf(c), nm0=nameOf(c), nameAt=namedType(c)?base.lastIndexOf(nm0):-1, sb=shortPath(base);
+    const pick=`<select class="isel pmsel" data-pmap="${c.id}" aria-label="Existing page for ${esc(nm(c))}"><option value="">${lk?'Other page…':'Pick a page'}</option><option value="__none">None covers it</option>${opts.map(p=>`<option value="${esc(p)}">${esc(shortPath(p))}</option>`).join('')}</select>`;
+    return `<span class="cell">${note(lk?'Page mapping unsure: likely an existing page':'Page mapping unsure: a page may cover it',' warn',"The page_mapping prompt was not sure an existing page covers this cluster")}${lk?`<span class="lrow">${link(lk.path)}<button class="lnk s" data-pmapuse="${c.id}|${esc(lk.path)}">Use this page</button></span>`:''}${o&&o.vol===c.vol?mergeBtn(o):''}${pick}<span class="s">or</span>${tog}${land}</span>`}
+  if(sepOf(c)!=='yes')return `<span class="cell">${tog}${land}</span>`;
+  const taken=slugTaken(c), base=slugOf(c), nm0=nameOf(c), nameAt=namedType(c)?base.lastIndexOf(nm0):-1, sb=shortPath(base), pt=ptLabel(pageTypeOf(c));
   const url=nameAt<0?`<span class="purl" title="${esc(base)}">${esc(sb)}</span>`:`<span class="purl" title="${esc(base)}">${esc(shortPath(base.slice(0,nameAt)))}<input class="pname" data-urlname="${c.id}" value="${esc(nm0)}" style="width:${Math.max(4,nm0.length)}ch" oninput="this.style.width=Math.max(4,this.value.length)+'ch'" aria-label="Page name for ${esc(nm(c))}" title="Click to edit the name in the URL">/</span>`;
-  const pt=ptLabel(pageTypeOf(c));
-  return `<span class="cell">${url}${taken?note(`Used by ${esc(taken)}`,' warn'):`<span class="s" title="URL from the MB URL guidelines for a ${esc(pt)} page">Planned · ${esc(pt)}${diff}</span>`}${subLine}</span>`}
+  const sub=subdOn(c)?`<span class="lab">Subdomain</span><span class="sdrow"><input class="plainin" data-subdurl="${c.id}" value="${esc(subdUrlOf(c))}" aria-label="Subdomain for ${esc(nm(c))}" title="Suggested from its focus keyword. Click to edit; clear it to go back to the suggestion"></span><button class="lnk s" data-subdtog="${c.id}">Remove subdomain</button>`
+    :`<span class="s"${(ENT[pageTypeOf(c)]||{}).subd?'':` title="${esc(pt)} pages get no subdomain by default (page planning sheet)"`}>${(ENT[pageTypeOf(c)]||{}).subd?'':'No subdomain by default · '}<button class="lnk s" data-subdtog="${c.id}">+ subdomain</button></span>`;
+  return `<span class="cell">${tog}<span class="lab">Subfolder</span>${url}${taken?note(`Used by ${esc(taken)}`,' warn'):''}${sub}${land}</span>`}
 const slugify=s=>'/'+String(s).toLowerCase().replace(/\(.*?\)/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 /* The seeds prompt's seeds and what became of each (export_hybrid.research_block). A CE EOS researched has none of ours,
    so its clusters' top keywords stand in. Seeds saved before the research list existed are replaced; ones you added stay. */
@@ -2481,7 +2524,7 @@ function launchConfirmLayer(){const R=S.lrun, L=(R?R.ids:S.lconfirm).map(id=>byI
   const done=R&&R.i>=R.steps.length;
   return `<div class="lback"><div class="lbox${R?' running':''}" role="dialog" aria-label="Launch">
    <div class="lhead"><div><div class="s">Execution · ${esc(D.ce.name)} · ${NEW_CE?'New CE (no CE ID yet): the page planning sheet’s New CE steps':'Existing CE: the page planning sheet’s Existing CE steps'}</div><h2>${done?'Launched':R?'Launching':'Launch'} ${L.length===1?esc(nm(L[0])):`${n(L.length)} pages`}</h2></div><button class="x" data-lcancel aria-label="Close">×</button></div>
-   <p class="s">${R?(done?'Every step ran. Anything content writes goes in the next Send to content; Perf asks go once their pages are live.':'The agent works through the plan and skips what already exists.'):'The agent creates only what is missing, in this order. Nothing is created until you launch.'}</p>
+   <p class="s">${R?(done?'Every step ran. Content picks up its part from the Content tab; Perf asks go once their pages are live and a product is on sale.':'The agent works through the plan and skips what already exists.'):'The agent creates only what is missing, in this order. Nothing is created until you launch.'}</p>
    <div class="${R?'lgrid':''}"><div>${L.map(c=>`<div class="plan"><b>${esc(nm(c))}</b> <span class="pill mute">${esc(pageTypeOf(c))}</span><ol class="lplan">${l5Plan(c).map(li).join('')}</ol></div>`).join('')}</div>
    ${R?`<aside class="lagent"><b class="s">Agent</b>${R.log.map(m=>`<p>${m}</p>`).join('')||'<p class="s">Starting…</p>'}</aside>`:''}</div>
    <div class="dfoot" style="justify-content:flex-end;gap:8px">${R?(done?'<button class="btn primary" data-lcancel>Done</button>':'<span class="s">Running…</span>'):`<button class="btn" data-lcancel>Cancel</button><button class="btn primary" data-lgo>Launch ${L.length>1?n(L.length)+' pages':''}</button>`}</div>
@@ -2846,7 +2889,7 @@ function act(sel,el){
     S.parent[c.id]=to;logChange(to?`Put <b>${esc(nm(c))}</b> under ${esc(nm(byId[to]))}`:`Took <b>${esc(nm(c))}</b> out of ${esc(from?nm(byId[from]):'its parent')}`,()=>{if(was===undefined)delete S.parent[c.id];else S.parent[c.id]=was})}
 }
 document.addEventListener('click',e=>{
-  const t=e.target.closest('[data-pmapuse],[data-mergewith],[data-pmapnone],[data-pmapundo],[data-subdtog],[data-urladd],[data-entset],[data-sgo],[data-vmenu],[data-l5],[data-hold],[data-oppsend],[data-stall],[data-assignok],[data-askaside],[data-mode],[data-chip],[data-row],[data-close],[data-dtab],[data-dfilter],[data-ssort],[data-dfam],[data-dfamclear],[data-mergeok],[data-mergeno],[data-stf],[data-tocontent],[data-tocontentall],[data-pmark],[data-perfreview],[data-clearsaved],[data-leaveok],[data-leaveno],[data-cell],[data-ptheme],[data-pclear],[data-layer],[data-undo],[data-seedadd],[data-seeddel],[data-leaveadd],[data-leavedel],[data-rerun],[data-pagelaunch],[data-sendperf],[data-intentok],[data-intentno],[data-renameok],[data-renameno],[data-grp],[data-kwfam],[data-agopen],[data-pagepop],[data-pageclose],[data-launch],[data-lclose],[data-lstart],[data-lans],[data-lfinish],[data-oppc],[data-oppall],[data-oppok],[data-oppno],[data-opptype],[data-allgroups],[data-type],[data-sort],[data-psort],[data-par],[data-cmtadd],[data-cmtdel],[data-copy],[data-view],[data-pexp],[data-stab],[data-partneradd],[data-partnerdel],[data-edit],[data-mergesel],[data-delsel],[data-sepok],[data-sepset],[data-askok],[data-askundo],[data-sepundo],[data-oppundo],[data-aview],[data-oppbulk],[data-oppfilter],[data-gogate],[data-pcard],[data-kwall],[data-kwadd],[data-kwact],[data-kwaddopen],[data-kwbulkremove],[data-kwbulkclear],[data-renamestart],[data-kwsug],[data-uncnew],[data-uncleave],[data-threset],[data-flagundo],[data-flagmove],[data-reviewed],[data-send],[data-copypkg],[data-golaunch],[data-launchall],[data-flagsup],[data-lcancel],[data-lgo],[data-itype]');
+  const t=e.target.closest('[data-kwopen],[data-pmapuse],[data-mergewith],[data-pmapnone],[data-pmapundo],[data-subdtog],[data-urladd],[data-sgo],[data-vmenu],[data-l5],[data-hold],[data-oppsend],[data-stall],[data-assignok],[data-askaside],[data-mode],[data-chip],[data-row],[data-close],[data-dtab],[data-dfilter],[data-ssort],[data-dfam],[data-dfamclear],[data-mergeok],[data-mergeno],[data-stf],[data-tocontent],[data-tocontentall],[data-pmark],[data-perfreview],[data-clearsaved],[data-leaveok],[data-leaveno],[data-cell],[data-ptheme],[data-pclear],[data-layer],[data-undo],[data-seedadd],[data-seeddel],[data-leaveadd],[data-leavedel],[data-rerun],[data-pagelaunch],[data-sendperf],[data-intentok],[data-intentno],[data-renameok],[data-renameno],[data-grp],[data-kwfam],[data-agopen],[data-pagepop],[data-pageclose],[data-launch],[data-lclose],[data-lstart],[data-lans],[data-lfinish],[data-oppc],[data-oppall],[data-oppok],[data-oppno],[data-opptype],[data-allgroups],[data-type],[data-sort],[data-psort],[data-par],[data-cmtadd],[data-cmtdel],[data-copy],[data-view],[data-pexp],[data-stab],[data-partneradd],[data-partnerdel],[data-edit],[data-mergesel],[data-delsel],[data-sepok],[data-sepset],[data-askok],[data-askundo],[data-sepundo],[data-oppundo],[data-aview],[data-oppbulk],[data-oppfilter],[data-gogate],[data-pcard],[data-kwall],[data-kwadd],[data-kwact],[data-kwaddopen],[data-kwbulkremove],[data-kwbulkclear],[data-renamestart],[data-kwsug],[data-uncnew],[data-uncleave],[data-threset],[data-flagundo],[data-flagmove],[data-reviewed],[data-send],[data-copypkg],[data-golaunch],[data-launchall],[data-flagsup],[data-lcancel],[data-lgo],[data-itype]');
   if(!t||e.target.closest('select,input'))return;const d=t.dataset;
   if(d.subdtog!==undefined){const c=byId[d.subdtog],had=c.id in S.subd,was=S.subd[c.id],to=!subdOn(c);S.subd[c.id]=to;
     logChange(`Subdomain for <b>${esc(nm(c))}</b>: ${to?esc(subdUrlOf(c)):'none'}`,()=>{if(had)S.subd[c.id]=was;else delete S.subd[c.id]})}
@@ -2857,8 +2900,6 @@ document.addEventListener('click',e=>{
   else if(d.pmapundo){const c=byId[d.pmapundo],was=S.pmap[c.id];delete S.pmap[c.id];logChange(`Page pick for <b>${esc(nm(c))}</b> undone`,()=>{S.pmap[c.id]=was})}
   else if(d.urladd!==undefined){const c=byId[d.urladd],had=c.id in S.sep,was=S.sep[c.id];S.sep[c.id]='yes';
     logChange(`Page for <b>${esc(nm(c))}</b> at ${esc(slugOf(c))}`,()=>{if(had)S.sep[c.id]=was;else delete S.sep[c.id]})}
-  else   if(d.entset!==undefined){const [cid,kind,v]=d.entset.split('|'),c=byId[cid],key=`${cid}|${kind}`,had=key in S.ent,was=S.ent[key];S.ent[key]=v;
-    logChange(`${kind==='poi'?'POI':'Collection'} for <b>${esc(nm(c))}</b>: create new on Launch`,()=>{if(had)S.ent[key]=was;else delete S.ent[key]})}
   else if(d.edit!==undefined){S.edit=!S.edit;S.pick.clear();S.kwSel.clear();S.kwMoveOpen=null;S.kwAddOpen=false;S.renaming=false;S.layer=null}
   else if(d.mergesel!==undefined){const L=[...S.pick].map(id=>byId[id]);if(mergeIntents(L).length>1||mergeLosses(L).length)S.mergeAsk=[...S.pick];else{mergeClusters(L);S.pick.clear()}}
   else if(d.clearsaved!==undefined){if(confirm(`Clear every saved decision for ${D.ce.name} in this browser? This cannot be undone.`))clearSaved();return}
@@ -2998,6 +3039,7 @@ document.addEventListener('click',e=>{
   else if(d.chip){S.chip=S.chip===d.chip?null:d.chip;S.aview='clusters'}
   else if(d.cell){const id=t.closest('tr').dataset.row, col=ALLCOLS.find(x=>x[0]===d.cell);S.sel=id;S.layer=null;S.renaming=false;S.dtab=col[2];S.dq='';S.dfilter='all';S.dctx=d.cell==='own'?'theme':d.cell;S.pflt=null;
     if(d.cell==='own'&&byId[id].theme?.top)S.pflt={col:'theme',name:byId[id].theme.top}}
+  else if(d.kwopen){S.sel=d.kwopen;S.layer=null;S.renaming=false;S.dtab='kwd';S.dfam=null;S.dq='';S.dfilter='all';S.dctx=null;S.pflt=null}
   else if(d.row){S.sel=d.row;S.layer=null;S.renaming=false;S.dtab='kw';S.dfam=null;S.dq='';S.dfilter='all';S.dctx=null;S.pflt=null}
   else if(d.sgo!==undefined){const cut=d.sgo.indexOf('|'),key=d.sgo.slice(0,cut),id=d.sgo.slice(cut+1),g=GROUPS.find(x=>x.main.concat(x.more).includes(key));if(g&&!g.main.includes(key)){S.open.add(g.id);saveOpen()}S.flash={id,key}}
   else if(d.vmenu!==undefined){S.vmenu=!S.vmenu}
