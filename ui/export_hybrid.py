@@ -827,6 +827,10 @@ po = po[po["ce"] == CE]
 # it. Orders link to a keyword, not a search, so their English part is the English share of Google's conversion value
 # (per keyword or ad group below, CE-wide here).
 paid_total = po["revenue_usd"].sum() * EN_SHARE_VALUE
+# Only orders whose click came from the CE's own search campaigns can trace to a cluster; Performance Max, other CEs'
+# campaigns and orders with no click id cannot, so they are the "own search" share, not a tracing gap.
+own_search = po["match_status"].eq("matched") & po["campaign_name"].fillna("").str.contains(rf"cid{CFG.get('eos_id', CE) if CE != 189 else CE}\b", regex=True)
+own_search_total = po.loc[own_search, "revenue_usd"].sum() * EN_SHARE_VALUE
 po = po[po["match_status"] == "matched"].assign(ag=lambda d: d["ad_group_id"].astype(str).str.replace(r"\.0$", "", regex=True),
                                                                     k=lambda d: d["keyword_text"].map(norm))
 key_of = totals.drop_duplicates(["ag", "k"]).set_index(["ag", "k"])["kw_key"]
@@ -838,7 +842,8 @@ ag_mix = (ag_mix / ag_mix.groupby(level=0).transform("sum")).rename("share").res
 rev_ag = po[po["kw_key"].isna()].merge(ag_mix, on="ag")
 rev_ag["rev"] = rev_ag["revenue_usd"] * rev_ag["share"] * rev_ag["ag"].map(ag_en).fillna(1.0)
 paid_rev = pd.concat([rev_kw[["cid", "rev"]], rev_ag[["cid", "rev"]]]).groupby("cid")["rev"].sum()
-traced_share = paid_rev.sum() / paid_total if paid_total else None
+traced_share = min(paid_rev.sum() / own_search_total, 1.0) if own_search_total else None
+own_search_share = own_search_total / paid_total if paid_total else None
 
 # Satvik's capture workbook covers Vatican only.
 cap = pd.read_csv(WB / "capture.csv").set_index("Cluster") if CE == 189 else pd.DataFrame().rename_axis("Cluster")
@@ -1042,6 +1047,8 @@ for cid, meta in names.iterrows():
     cl = {
         "id": cid, "name": name, "type": meta["t"], "seeded": not in_eos, "head": name == HEAD_NAME or "Head Term" in name,
         "n_kw": int(len(k)), "vol": r(top_kw["vol"].iloc[0]) if len(top_kw) and pd.notna(top_kw["vol"].iloc[0]) else None,
+        # Coverage's denominator: every keyword family once (Planner gives a family's spellings one shared volume).
+        "vol_total": r(k.assign(f=[fam_of(v, key) for v, key in zip(k["vol"].fillna(0), k["k"])]).groupby("f")["vol"].first().fillna(0).sum()) if len(k) else None,
         "vol_source": "eos", "focus_kw": top_kw["kw"].iloc[0] if len(top_kw) else None,
         "adg": own_ad_group(k, top_kw["kw"].iloc[0] if len(top_kw) else None),
         "impr": r(impr), "clicks": r(clicks), "spend": r(spend, 2), "google_value": r(cm1, 2), "conv": r(conv, 1),
@@ -1131,25 +1138,28 @@ for cid, meta in names.iterrows():
 # Search-term view of each cluster (what Perf reads): the share Google shows, conversions for CM1 per order, and the
 # language split. The campaign's language is the third part of its name ("Rome - Vatican - German - All - ...").
 stba["cid"] = stba["k"].map(pair_cid[COL])
-stba["lang"] = stba["campaign_name"].str.split(" - ").str[2]
+stba["lang"] = stba["campaign_name"].str.split(" - ").str[2].str.strip().str.capitalize()
 st_cid = stba.dropna(subset=["cid"]).groupby("cid")[["impr", "clicks", "spend", "conv", "conv_value"]].sum()
 lang_cid = stba.dropna(subset=["cid"]).groupby(["cid", "lang"])["clicks"].sum()
 st_shown = div(stba["clicks"].sum(), totals["clicks"].sum())
 
-# Ad groups serving a cluster (Paid tab): its search-term clicks by ad group, with the same ad group name in one
-# language counted once across country campaigns (Perf edits them as a set). share_of_group = this cluster's part
-# of that ad group's clicks, which says whether the group is built for the cluster or the cluster rides a generic one.
-group_clicks = stba.groupby(["ad_group_name", "lang"])["clicks"].sum()
+# Ad groups serving a cluster (Paid tab): its search-term clicks by ad group. Copies of one ad group in campaigns that
+# differ only by country (Vatican's "Rome - Vatican - English - Italy/USA - ...") count once, since Perf edits them as a
+# set; ad groups of the same name in campaigns on different themes (Milford's Cruise vs Flights) stay apart. The
+# country is the 4th " - " part of the campaign name. share_of_group = this cluster's part of that ad group's clicks,
+# which says whether the group is built for the cluster or the cluster rides a generic one.
+stba["camp_set"] = stba["campaign_name"].map(lambda n: " - ".join((p := str(n).split(" - "))[:3] + p[4:]) if str(n).count(" - ") >= 4 else str(n))
+group_clicks = stba.groupby(["ad_group_name", "lang", "camp_set"])["clicks"].sum()
 
 
 def ad_groups_serving(cid, cluster_keys):
     mine = stba[stba["cid"] == cid]
     if not mine["clicks"].sum():
         return None
-    g = mine.groupby(["ad_group_name", "lang"]).agg(clicks=("clicks", "sum"), spend=("spend", "sum"), cv=("conv_value", "sum"),
-                                                    countries=("campaign_name", "nunique"), ags=("ag", lambda a: set(a))).reset_index()
+    g = mine.groupby(["ad_group_name", "lang", "camp_set"]).agg(clicks=("clicks", "sum"), spend=("spend", "sum"), cv=("conv_value", "sum"),
+                                                                countries=("campaign_name", "nunique"), ags=("ag", lambda a: set(a))).reset_index()
     g["share_of_cluster"] = g["clicks"] / mine["clicks"].sum()
-    g["share_of_group"] = [c / group_clicks[(a, l)] for a, l, c in zip(g["ad_group_name"], g["lang"], g["clicks"])]
+    g["share_of_group"] = [c / group_clicks[(a, l, s)] for a, l, s, c in zip(g["ad_group_name"], g["lang"], g["camp_set"], g["clicks"])]
     g = g.sort_values("clicks", ascending=False)
     rows = []
     for x in g.head(5).itertuples():
@@ -1165,6 +1175,8 @@ def ad_groups_serving(cid, cluster_keys):
 
 # Campaign targets. Portfolio-strategy campaigns carry 0 in the export, so they keep the strategy name.
 troas = pd.read_csv(OUT / f"campaign_troas_{CE}.csv")
+# Keyed by name, so a removed campaign sharing a live one's name (two at the reef) must not overwrite its target.
+troas = troas.assign(_live=troas["campaign_status"].ne("REMOVED")).sort_values("_live") if "campaign_status" in troas else troas
 troas = {x.campaign_name: (r(x.target_roas, 2) if x.target_roas else None, None if pd.isna(x.bidding_strategy_name) else x.bidding_strategy_name)
          for x in troas.itertuples()}
 camp_cid = stba.dropna(subset=["cid"]).groupby(["cid", "campaign_name"])[["clicks", "spend", "conv_value"]].sum()
@@ -1202,6 +1214,21 @@ def lp_path(u):
     path = "/" + "/".join(re.sub(r"^https?://[^/]+/?", "", u).strip("/").split("/")) if u else ""
     return host, ("/" if path in ("/", "") else path.rstrip("/") + "/")
 lpr = pd.read_csv(OUT / f"landing_page_results_{CE}.csv").assign(ag=lambda d: d["ad_group_id"].astype(str))
+# Where clicks landed comes from Google's landing page view, not the ad's final URL (Milford's Mitre Peak ads point at
+# home, yet three in four of their clicks land on /mitre-peak/). That view has no conversions, so each ad group's
+# conversions are shared over its landing pages by clicks. An ad group the view lacks keeps the final-URL rows.
+_lpv_file = OUT / f"landing_page_views_{CE}.csv"
+if _lpv_file.exists() and _lpv_file.stat().st_size:
+    lpv = pd.read_csv(_lpv_file)
+    ag_of = {(c, a): str(ag) for ag, a, c in zip(ag_meta.index, ag_meta["ad_group_name"], ag_meta["campaign_name"])}
+    lpv["ag"] = [ag_of.get((c, a)) for c, a in zip(lpv["campaign_name"], lpv["ad_group_name"])]
+    lpv = lpv.dropna(subset=["ag"])
+    conv_ag = lpr.groupby("ag")[["conv", "conv_value"]].sum()
+    lpv_share = (lpv["clicks"] / lpv.groupby("ag")["clicks"].transform("sum").replace(0, np.nan)).fillna(0)
+    for col in ("conv", "conv_value"):
+        lpv[col] = lpv["ag"].map(conv_ag[col]).fillna(0) * lpv_share
+    lpr = pd.concat([lpv[["campaign_name", "ag", "landing_url", "clicks", "impr", "spend", "conv", "conv_value"]],
+                     lpr[~lpr["ag"].isin(set(lpv["ag"]))]], ignore_index=True)
 lpr[["host", "path"]] = pd.DataFrame([lp_path(u) for u in lpr["landing_url"]], index=lpr.index, columns=["host", "path"])
 # Where the cluster's core ad group sends its clicks: the final URL with most clicks across that ad group's ads.
 core_lp = lpr.assign(ag_name=lpr["ag"].map(ads["ad_group_name"])).groupby(["ag", "host", "path"])["clicks"].sum().reset_index()
@@ -1400,9 +1427,11 @@ def searched_products(cl):
 
 
 # The CE's home is its Payload "Theme" page: the bare host on most sites, /home on Park Güell's.
-_pg_all = pd.read_csv(HERE / "hybrid" / "pages_189.csv" if CE == 189 else OUT / f"pages_{CE}.csv", usecols=["uid", "page_type", "collection_id"],
-                      dtype={"collection_id": str})
-_theme = _pg_all.loc[(_pg_all["page_type"] == "Theme") & _pg_all["uid"].str.startswith(HOST)]
+_pg_all = pd.read_csv(HERE / "hybrid" / "pages_189.csv" if CE == 189 else OUT / f"pages_{CE}.csv", dtype={"collection_id": str})
+# A draft Theme page (Everglades /test) is not the CE's home: new page URLs would be proposed under it.
+_live = _pg_all["status_en"].eq("published") if "status_en" in _pg_all else True
+_theme = _pg_all.loc[(_pg_all["page_type"] == "Theme") & _pg_all["uid"].str.startswith(HOST) & _live]
+_theme = _theme.iloc[_theme["uid"].str.len().argsort()]
 # On a city site every CE has a Theme page; the CE's own lists its collection. The page column builds new URLs under it.
 _own = _theme[_theme["collection_id"].fillna("").str.split(".").str[0] == str(CE if CE == 189 else CFG.get("eos_id") or CE)]
 _theme = (_own if len(_own) else _theme)["uid"]
@@ -1525,7 +1554,7 @@ ce.update({"search_terms_shown": r(st_shown, 3), "weeks": [str(w) for w in weeks
            "label": None if CE == 189 else CFG.get("eos_id"),
            "paid_keyword": {"clicks": r(totals["clicks"].sum()), "spend": r(totals["spend"].sum(), 2), "conv_value": r(totals["conv_value"].sum(), 2)},
            "kw_snapshot": KW_SNAPSHOT,
-           "live_keywords": sorted(kw_ags.index), "home_funnel": page_funnel(HOME_PATH), "paid_revenue_traced": r(traced_share, 3), "clusters_from": "hybrid_eos_v5" if CE == 189 else "hybrid_11ce",
+           "live_keywords": sorted(kw_ags.index), "home_funnel": page_funnel(HOME_PATH), "paid_revenue_traced": r(traced_share, 3), "paid_revenue_own_search": r(own_search_share, 3), "clusters_from": "hybrid_eos_v5" if CE == 189 else "hybrid_11ce",
            # Every child collection and POI under the CE, so Set-up can name the entity a live page lists.
            "entities": [{"type": x.entity_type, "id": str(x.entity_id), "name": x.name, "active": bool(x.is_active),
                          **({"operator": True} if x.operator else {})} for x in ents.itertuples()]})

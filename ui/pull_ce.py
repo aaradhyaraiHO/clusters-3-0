@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from window import tokens as window_tokens, window
+from window import FIXED, tokens as window_tokens, window
 
 HERE = Path(__file__).resolve().parent
 TEMPLATES = HERE / "sql" / "templates"
@@ -78,6 +78,11 @@ def main():
     folder.mkdir(exist_ok=True)
     # The export labels the CE's numbers with the window they were pulled on, not whatever window.py says later.
     start, end = window()
+    # Search terms and keyword totals are not pulled here: they come from the 30 Oct validation snapshot (map_ce.py,
+    # final_ce.py), fixed at 30 Jul - 27 Oct. Another window would mix those with the new one under the new label.
+    if (start, end) != FIXED:
+        raise SystemExit(f"window {start} to {end}: search terms and keyword totals still come from the fixed 30 Oct "
+                         f"snapshot, so the numbers would mix windows. Re-pull them for every CE before moving the window.")
     (folder / "window.json").write_text(json.dumps({"start": start, "end": end}))
     env = {**os.environ, "CLOUDSDK_CONFIG": gcloud_config()}
     names = [t.stem for t in sorted(TEMPLATES.glob("*.sql"))]

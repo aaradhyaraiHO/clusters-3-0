@@ -4,8 +4,9 @@
   CLUSTERS_WINDOW=rolling      the latest 90 days whose Google Ads data has settled (ending two days ago)
   CLUSTERS_WINDOW=2026-08-01:2026-10-29   any other window, start and end inclusive
 
-Switch every CE at once: a CE pulled on another window than the rest shows numbers that do not compare. The
-pipeline's own search-term pull (run_ce_pipeline.py) already reads the latest 90 days.
+Switch every CE at once: a CE pulled on another window than the rest shows numbers that do not compare. pull_ce.py
+refuses any window but the fixed one until search terms and keyword totals, which come from the 30 Oct snapshot, are
+re-pulled on the same window.
 
 The SQL templates use the tokens below instead of dates. Their offsets are the ones the fixed window was written
 with: Google Ads entity tables are read at the partition the day after the window ends, the gclid lookup starts six

@@ -1001,7 +1001,7 @@ const ratio=(a,b)=>a==null||!b?null:a/b;
 const cvrOf=c=>c.clicks&&c.conv!=null?c.conv/c.clicks:null;
 const C=D.clusters, byId=Object.fromEntries(C.map(c=>[c.id,c]));
 const WINDOW=D.ce.window||'30 Jul – 27 Oct 2026';
-const HOST=D.ce.host||'www.thevaticantickets.com';
+const HOST=D.ce.host||'www.thevaticantickets.com', ROOT_HOST=HOST.replace(/^www\./,'');
 document.title=`${D.ce.name.replace(/ (Museums|Cruises)$/,'')} Clusters`;
 const TYPE={TRANSACTIONAL:'Transactional',PLANNING:'Planning',INFORMATIONAL:'Informational'};
 const TR=c=>c.type==='TRANSACTIONAL';
@@ -1096,7 +1096,7 @@ const G={
  fk:['Focus keyword','The keyword family that stands for the cluster; its searches are the cluster\'s searches.','EOS keyword research'],
  intent:['Intent','Buying, planning or informational, from the clustering.','EOS keyword research'],
  vol:['Searches / mo','Keyword Planner volume of the cluster\'s focus keyword (named under it), never a sum of spelling variants. ≈ = impressions, a lower bound.','EOS keyword research'],
- cov:['Coverage','Paid impressions a month ÷ searches a month, from the searches mapped to the cluster. 0% = not in our ads. EOS volume is worldwide English keywords while impressions come from every language\'s campaign, so it can pass 100%.','Google Ads search terms + EOS'],
+ cov:['Coverage','Paid impressions a month ÷ searches a month, both over every keyword family in the cluster. Impressions are the English part of each keyword\'s impressions, hidden searches included; searches are Keyword Planner volumes. 0% = not in our ads. It is not Google\'s search impression share, which counts only auctions we were eligible for.','Google Ads keywords and search terms + Keyword Planner'],
  wow:['Clicks, 13 weeks','Paid clicks a week on the cluster\'s searches, and the change in the last full week (19 Oct) against the week before.','Google Ads search terms by week'],
  wroi:['ROI last week','Paid ROI in the last full week, and the week before.','Google Ads search terms by week'],
  cm1o:['Avg CM1','Conversion value ÷ conversions on the cluster\'s searches: CM1 per order under CM1 bidding.','Google Ads search terms'],
@@ -1106,19 +1106,19 @@ const G={
  theme:['Served by theme','The ad group theme carrying most of its clicks, and this cluster\'s share of that theme\'s clicks. Shared = under 10%: the ads and landing page are written for other intents.','Google Ads keyword report × ad groups'],
  clicks:['Paid clicks','Paid clicks on searches mapped to the cluster, 90 days.','Google Ads'],
  cvr:['CVR','Google Ads conversions ÷ paid clicks, 90 days. Each keyword\'s conversions are split over clusters the way its CM1 is.','Google Ads keywords'],
- roi:['Paid ROI','Google Ads conversion value ÷ spend. Under 100% loses money; 140% is the target.','Google Ads'],
+ roi:['Paid ROI','Google Ads conversion value ÷ spend. Under 100% loses money. Health compares it with the target ROAS of the campaigns that served the cluster, weighted by their clicks; green = at or above that target.','Google Ads'],
  ptype:['Page type','The page type from the cluster-to-page mapping prompt. It decides the entities and whether content reviews the page. Click to change; content checks it here before launch.','Page mapping'],
  url:['Page URL','A live page shows its URL, locked (changes happen in Payload), and where its ads land. Otherwise Separate page: Yes or No, filled in by the separate_page prompt (auto) or by you (changed). Yes opens the subfolder and, for page types that get one, the subdomain. Page mapping unsure: the page_mapping prompt was not sure an existing page covers it.','Payload, page prompts, MB URL guidelines'],
- page:['Ads land on','Where the cluster\'s paid clicks land, estimated: the landing pages of the ad groups that served its searches, each weighted by its share of that ad group\'s clicks. Warns when a buying cluster with 20+ clicks has its own page but under half its clicks land there.','Google Ads landing pages and search terms (BigQuery)'],
- status:['Health','What is wrong with the cluster, first rule that applies: Supply thin (no unique experience on sale), Not set up (own page chosen, no page yet), No traffic (under 100 paid clicks or coverage below its bar), Underperforming (ROI more than 5 points under its campaigns\' target, or under 100%), Working. Content clusters: page live or not.','Supply, pages, Google Ads'],
+ page:['Ads land on','Where the cluster\'s paid clicks landed (Google\'s landing page report): the pages each ad group\'s clicks reached, weighted by the cluster\'s share of that ad group\'s clicks. A click on the page\'s own subdomain counts as on its page. Warns when a buying cluster with 20+ clicks has its own page but under half its clicks land there.','Google Ads landing page view and search terms (BigQuery)'],
+ status:['Health','What is wrong with the cluster, first rule that applies: Supply thin or Check supply, Not set up (own page chosen, no page yet), Not in ads (the CE has no paid data), No traffic (under 100 paid clicks), Underperforming (ROI under 100%), Low coverage (coverage below its bar at 1,000+ searches), Underperforming (ROI more than 5 points under its campaigns\' target), Working. Content clusters: page live or not.','Supply, pages, Google Ads'],
  lnch:['Launch','One Launch takes the cluster all the way: supply (growth or the BDM add an experience), the page (set up now when content need not review its page type, otherwise in the CE\'s Send to content), and its Perf ask, sent to Perf\'s tool once the page is live. After it, the cell says who the cluster waits on. Hold keeps a cluster out.','Your call'],
  setup:['Setup status','What the cluster needs and what already exists: experiences on sale, the Headout entities its page type requires (page planning sheet), its microbrand page and its own ad group. It only reports; every choice and change is made with Launch.','Payload, Headout entities, Google Ads'],
  prod:['Supply','Buying clusters. Unique · available: experiences matched to this intent are on sale (with how many). Covered · on sale: no product of its own, but its page sells ones that serve it. Otherwise growth sets it: covered by a broader product (a part of the site the main ticket includes), unique experience with supply coming, or unique experience with no supply.','Experience matching + orders + Payload pages'],
  nkw:['Keywords','Keywords in the cluster, after your moves.','EOS keyword research'],
  spend:['Spend','Google Ads cost, USD, 90 days.','Google Ads'],
  cpc:['CPC','Spend ÷ paid clicks, USD.','Google Ads'],
- rpc:['RPC',`Headout paid revenue ÷ paid clicks, USD. Paid orders are traced by gclid to a keyword, then spread over clusters; ${pct(D.ce.paid_revenue_traced)} of paid revenue traces, so RPC runs low.`,'Orders + Google Ads clicks'],
- prev:['Paid revenue',`Headout net revenue of paid orders traced through the click, USD, 90 days. ${pct(D.ce.paid_revenue_traced)} of paid revenue traces.`,'Orders + Google Ads clicks'],
+ rpc:['RPC',`Headout paid revenue ÷ paid clicks, USD. Paid orders are traced by gclid to a keyword, then spread over clusters. ${pct(D.ce.paid_revenue_own_search)} of the CE's paid revenue comes through its own search campaigns (the rest is Performance Max, other campaigns or orders with no click id); ${pct(D.ce.paid_revenue_traced)} of that traces to a cluster.`,'Orders + Google Ads clicks'],
+ prev:['Paid revenue',`Headout net revenue of paid orders traced through the click, USD, 90 days. ${pct(D.ce.paid_revenue_own_search)} of the CE's paid revenue comes through its own search campaigns; ${pct(D.ce.paid_revenue_traced)} of that traces to a cluster.`,'Orders + Google Ads clicks'],
  oc:['Organic clicks','Search Console clicks on queries mapped to the cluster, 90 days.','Search Console'],
  opos:['Position','Impression-weighted average Google position. Lower is better.','Search Console'],
  rank:['Ranking page','Our page with the most organic clicks on the cluster\'s queries, and its share of them.','Search Console'],
@@ -1131,7 +1131,7 @@ const G={
  pcap:['Paid capture','Paid impressions ÷ the cluster\'s monthly demand: how much of the searching we show up for.','Satvik\'s capture run'],
  ocap:['Organic capture','Organic clicks ÷ the cluster\'s monthly demand.','Satvik\'s capture run'],
  xlaunch:['Launch','Opens the cluster\'s step plan: what exists is kept, the rest is set up, and you are asked at each checkpoint.','Entity, pages, rankings, Google Ads'],
- ask:['Perf ask','Drafted from search terms (Aditya): low coverage and its own keywords barely catch its clicks → Cover this cluster; low coverage with its own keywords but no ad group or page of its own → Own ad group + page; set-up complete → a note to raise RPC; its ad group lands off its page → Land its ads on its page. Agree, change or Not now; only agreed asks go to Perf, who decide the keywords. Coverage bar 10% at 1,000+ searches is a stand-in until Perf sets it.','Google Ads search terms + keyword mapping'],
+ ask:['Perf ask','Drafted from search terms (Aditya), for clusters whose page sells. A CE with no ads yet: Set up this cluster at 500+ searches with a product on sale. Low coverage with something on sale and no ad group of its own, or ads landing off its page: Cover its searches. Low coverage with its set-up complete: a note to raise RPC. Coverage fine but 100+ paid clicks landing off its page: Land its ads on its page. Agree, change or Not now; only agreed asks go to Perf, who decide the keywords. Coverage bar 10% at 1,000+ searches is a stand-in until Perf sets it.','Google Ads search terms + keyword mapping'],
 };
 const tip=key=>G[key]?`<span class="tip" title="${esc(G[key][1]+' Source: '+G[key][2])}">${IC.info}</span>`:'';
 /* Keyword Planner gives close variants one shared volume, so a cluster can inherit a big keyword's number:
@@ -1142,7 +1142,7 @@ C.forEach(c=>{c.signal=signal(c)});
 /* Coverage = paid impressions a month ÷ searches a month, both from the search-term view (Abby, 29 Oct). EOS volume is
    worldwide but English-only while impressions come from every language's campaign, so it can pass 100%. */
 C.forEach(c=>{
-  const st=c.st||{}; c.cover=c.vol&&st.impr!=null?st.impr/MONTHS/c.vol:null;
+  const st=c.st||{}, vt=c.vol_total||c.vol; c.cover=vt&&(c.impr||c.st)?(c.impr||0)/MONTHS/vt:null;
   c.cm1o=st.conv?st.cv/st.conv:null; c.shown=st.shown??null;
   const W=c.weekly||[], last=W[W.length-1]||{}, prev=W[W.length-2]||{};
   c.wk=W.map(x=>x.clicks||0); c.wow=prev.clicks?(last.clicks||0)/prev.clicks-1:null;
@@ -1151,21 +1151,21 @@ C.forEach(c=>{
 const spark=(arr,w=64,h=18)=>{const m=Math.max(1,...arr);if(!arr.length)return'';const pts=arr.map((v,i)=>`${(i*(w/(arr.length-1||1))).toFixed(1)},${(h-1-(v/m)*(h-2)).toFixed(1)}`).join(' ');
   return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`};
 const chg=(v,d=0)=>v==null||!isFinite(v)?'<span class="dim">–</span>':`<span style="color:${v<-.1?'var(--bad)':v>.1?'var(--ok)':'inherit'}">${v>0?'+':''}${(v*100).toFixed(d)}%</span>`;
-const coverCell=c=>c.cover==null?'<span class="dim">–</span>':c.cover===0||(c.st?.impr||0)===0?'<span class="cell"><span>0%</span><span class="s">not in our ads</span></span>':c.cover>1?'<span title="Paid impressions come from every language\'s campaign; EOS volume is English keywords only">100%+</span>':c.cover<.001?'<0.1%':pct(c.cover,c.cover<.01?1:0);
+const coverCell=c=>c.cover==null?'<span class="dim">–</span>':c.cover===0||(c.impr||0)===0?'<span class="cell"><span>0%</span><span class="s">not in our ads</span></span>':c.cover>1?`<span title="More paid impressions than the Keyword Planner volume of its keywords: its searches reach beyond its keyword list.${c.sis!=null?` Google's search impression share: ${pct(c.sis)}.`:''}">100%+</span>`:c.cover<.001?'<0.1%':pct(c.cover,c.cover<.01?1:0);
 const volNum=c=>c.vol==null?'–':c.vol_source==='impressions'?`<span class="est">≈</span>${n(c.vol)}`:n(c.vol);
 const VOLMAX=Math.max(1,...C.filter(c=>!OTHER(c)).map(c=>c.vol||0));
 const volBar=c=>`style="--w:${Math.round(Math.sqrt((c.vol||0)/VOLMAX)*100)}%"`;
 // Square-root scale so the long tail stays visible next to the head term.
 const volCell=c=>`<span class="cell num"><span>${volNum(c)}</span><i class="vbar" ${volBar(c)} aria-hidden="true"></i>${c.focus_kw?`<span class="s" title="Focus keyword: ${esc(c.focus_kw)}">${esc(focusLabel(c))}</span>`:''}${OTHER(c)?'':`<button class="lnk s" data-kwopen="${c.id}" title="Open its keyword list">${n(kwCount(c))} keyword${kwCount(c)===1?'':'s'}</button>`}</span>`;
-// Coverage as a number with a status dot, not a bar: paid impressions come from every language's campaigns while searches
-// are English keyword volume, so values pass 100% and a length scale would overstate them. Green at or above the CE's
-// bar (Perf thresholds), amber below; small clusters under the search minimum are never flagged.
+// Coverage as a number with a status dot, not a bar: keyword volumes are Planner estimates, so a value can pass 100% and
+// a length scale would overstate it. Green at or above the CE's bar (Perf thresholds), amber below; small clusters under
+// the search minimum are never flagged.
 const roiLine=c=>!HASPAID||!c.clicks?'':c.clicks<100?`<span class="s" title="Under 100 paid clicks, so ROI would be noise">Too few clicks (${n(c.clicks)})</span>`:`<span class="s">ROI ${pct(c.roi)} · ${k(c.clicks)} clicks</span>`;
 // A cluster whose clicks mostly come from searches Google hides is split by keyword text, not by what people typed.
 const hiddenNote=c=>c.shown!=null&&(c.clicks||0)>=PAID_FLOOR&&1-c.shown>=.3?`<span class="s warn" title="Google does not show the search behind these clicks; they follow their keyword's split">${pct(1-c.shown)} of clicks from hidden searches</span>`:'';
 const coverMeter=c=>{if(c.cover==null)return coverCell(c)+roiLine(c)+hiddenNote(c);const ok=c.cover>=lowBar(c)||(c.vol||0)<TH().minSearches;
-  return `<span class="cov ${ok?'ok':'low'}" title="${ok?'At or above':'Below'} the ${pct(lowBar(c))} bar for ${(TYPE[typeOf(c)]||"other").toLowerCase()} clusters${c.cover>1?'. Over 100% because paid impressions come from every language while searches are English keyword volume':''}">${coverCell(c).replace(/<[^>]+>/g,' ').trim()}</span>${roiLine(c)}${hiddenNote(c)}`};
-const roiCell=c=>c.roi==null?'–':`<span style="color:${c.roi<1?'var(--bad)':c.roi>=1.4?'var(--ok)':'inherit'}">${pct(c.roi)}</span>`;
+  return `<span class="cov ${ok?'ok':'low'}" title="${ok?'At or above':'Below'} the ${pct(lowBar(c))} bar for ${(TYPE[typeOf(c)]||"other").toLowerCase()} clusters${c.cover>1?'. Over 100%: its searches reach beyond its keyword list':''}${c.sis!=null?`. Google\'s search impression share: ${pct(c.sis)}`:''}">${coverCell(c).replace(/<[^>]+>/g,' ').trim()}</span>${roiLine(c)}${hiddenNote(c)}`};
+const roiCell=c=>{if(c.roi==null)return'–';const t=targetOf(DR.clusters[c.id]||{})||TH().roi;return `<span style="color:${c.roi<1?'var(--bad)':c.roi>=t-.05?'var(--ok)':'inherit'}">${pct(c.roi)}</span>`};
 // A page can sit on another site than the CE's own (Park Güell's on barcelona-tickets.com/park-guell): its host stays with it.
 const pageHost=p=>(String(p.path).match(/^(www\.[a-z0-9.-]+?\.(?:co\.[a-z]{2}|com\.[a-z]{2}|[a-z]{2,3}))(?=\/|$)/)||[])[1]||HOST;
 const pathOf=p=>p.path.replace(pageHost(p),'').replace(/^\/$/,'')||'/';
@@ -1289,8 +1289,8 @@ function prodCell(c){
 const SEP_L={yes:'Yes',no:'No'};
 /* Current status (Parag, 10 Nov): what is wrong with a cluster, first rule that applies. Buying clusters: not set up,
    supply, traffic, return. Content clusters only have a page or not. */
-const ST={nosetup:['Not set up','bad'],supply:['Supply thin','warn'],check:['Check supply','mute'],traffic:['No traffic','warn'],under:['Underperforming','warn'],ok:['Working','ok'],nopage:['No page yet','mute'],live:['Page live','ok']};
-const ST_RANK={nosetup:0,supply:1,check:1.5,traffic:2,under:3,nopage:4,ok:5,live:6};
+const ST={nosetup:['Not set up','bad'],supply:['Supply thin','warn'],check:['Check supply','mute'],noads:['Not in ads','mute'],traffic:['No traffic','warn'],under:['Underperforming','warn'],lowcov:['Low coverage','warn'],ok:['Working','ok'],nopage:['No page yet','mute'],live:['Page live','ok']};
+const ST_RANK={nosetup:0,supply:1,check:1.5,noads:1.8,traffic:2,under:3,lowcov:3.5,nopage:4,ok:5,live:6};
 function statusOf(c){
   if(OTHER(c))return null;
   if(!TR(c))return c.pages.length?{k:'live',why:esc(pathOf(mainPage(c)||c.pages[0]))}:{k:'nopage',why:"content's call"};
@@ -1298,12 +1298,14 @@ function statusOf(c){
   // Supply thin only when the data says so; when no product could be matched either way, growth sets it.
   if(!st.yes)return st.v?{k:'supply',why:st.v==='uniq_no'?'its product is not on sale':'no unique experience'}:{k:'check',why:'no product matched yet: set it'};
   if(sepOf(c)==='yes'&&!c.pages.length)return{k:'nosetup',why:S.sentContent?.has(c.id)?'with content, no page yet':S.L[c.id]||S.lstate[c.id]==='launched'?(LAUNCH_DIRECT.has(pageTypeOf(c))?'launched, page in draft':'launched, waiting for content'):'no page yet'};
-  if(!HASPAID)return{k:'ok',why:''};
+  if(!HASPAID)return{k:'noads',why:'no paid data for this CE'};
   const tgt=targetOf(DR.clusters[c.id]||{}), cov=c.cover;
   if((c.clicks||0)<PAID_FLOOR)return{k:'traffic',why:`${n(c.clicks||0)} paid clicks`};
-  if(cov!=null&&cov<lowBar(c)&&(c.vol||0)>=TH().minSearches)return{k:'traffic',why:`coverage ${pct(cov,1)} against a ${pct(lowBar(c))} bar`};
+  // A cluster losing money says so before anything about its coverage.
+  if(c.roi!=null&&c.roi<1)return{k:'under',why:`ROI ${pct(c.roi)}: it loses money`};
+  if(cov!=null&&cov<lowBar(c)&&(c.vol||0)>=TH().minSearches)return{k:'lowcov',why:`coverage ${pct(cov,1)} against a ${pct(lowBar(c))} bar`};
   // Within 5 points of target is on track: targets are set in whole steps and a week's mix moves ROI by more.
-  if(c.roi!=null&&(c.roi<1||(tgt&&c.roi<tgt-.05)))return{k:'under',why:`ROI ${pct(c.roi)} against a ${pct(tgt||1)} target`};
+  if(c.roi!=null&&tgt&&c.roi<tgt-.05)return{k:'under',why:`ROI ${pct(c.roi)} against a ${pct(tgt)} target`};
   return{k:'ok',why:`ROI ${pct(c.roi)}${tgt?` against ${pct(tgt)}`:''}${landsOff(c)&&(c.clicks||0)>=PAID_FLOOR?'; ads land off its page':''}`}}
 const statusCell=c=>{const x=statusOf(c);if(!x)return '<span class="dim">–</span>';const [l,k2]=ST[x.k];return `<span class="cell"><span class="stchip st-${k2}">${l}</span>${x.why?`<span class="s">${x.why}</span>`:''}</span>`};
 const ptLabel=t=>String(t).replace(/^(Non-)?POI:\s*/,'').replace(/_/g,'-');
@@ -1417,8 +1419,13 @@ const ownAgShare=c=>DR.clusters[c.id]?.ag_serving?.own_share||0;
    the cluster's: that read flagged Flights to Milford Sound, whose clicks land 94% on its own page. */
 function landOf(c){const lp=DR.clusters[c.id]?.lp||[];if(!lp.length)return null;
   const mp=mainPage(c)||(S.pmap[c.id]&&S.pmap[c.id]!=='none'?{path:S.pmap[c.id]}:null), ownHome=!!mp&&(!!mp.home||pathOf(mp)==='/');
-  const own=mp?(ownHome?'/':pathOf(mp)):null, isOwn=p=>ownHome?isHome(p):normPath(p)===normPath(own);
-  const top=lp[0];return{path:top.path,host:top.host,share:top.share||0,own,ownHome,onOwn:own?lp.filter(x=>isOwn(x.path)).reduce((s,x)=>s+(x.share||0),0):null}}
+  const own=mp?(ownHome?'/':pathOf(mp)):null, slug=own&&!ownHome?normPath(own).split('/').filter(Boolean).pop():null;
+  // A page's subdomain is named after it, give or take the generic words: Everglades Holiday Park's clicks land on
+  // everglades-holiday-park.everglades-tickets.com/, the reef's Fitzroy Island ones on fitzroyisland.cairnstickets.com/.
+  const bare=t=>String(t||'').toLowerCase().replace(/(^|-)(tours?|tickets?|from|to|the|cruises?)(?=-|$)/g,'').replace(/[^a-z0-9]/g,''), sl=slug?bare(slug):'';
+  const onSub=x=>sl.length>=4&&!!x.host&&x.host!==ROOT_HOST&&isHome(x.path)&&(b=>!!b&&(b.includes(sl)||sl.includes(b)))(bare(x.host.split('.')[0]));
+  const isOwn=x=>ownHome?isHome(x.path)&&(!x.host||x.host===ROOT_HOST):normPath(x.path)===normPath(own)||onSub(x);
+  const top=lp[0];return{path:top.path,host:top.host,share:top.share||0,own,ownHome,onOwn:own?lp.filter(isOwn).reduce((s,x)=>s+(x.share||0),0):null}}
 // A mismatch is worth Perf's time only on a buying cluster with clicks enough to act on: ads for an informational search
 // landing on home, where people buy, can be deliberate.
 const LAND_MIN=20;
@@ -2566,9 +2573,10 @@ const isLocaleHome=p=>/^\/[a-z]{2}(-[a-z]{2})?\/?$/.test(String(p||''));
 // Search - All - All - cid3945" → "Milford Sound Cruise · English"; "Generic - Exact - English - Cruise" → "Cruise · English · Exact".
 const campShort=v=>{const p=String(v||'').split(' - ').filter(w=>!/^(All|Search|cid\d+)$/i.test(w.trim()));return (p.length>2?p.slice(1):p).join(' · ')||String(v||'')};
 const agShort=v=>{const p=String(v||'').split(' - ');return p.length>=3&&/^(Exact|Broad|Phrase)$/i.test(p[1])?`${p.slice(3).join(' ')||'All'} · ${p[2]} · ${p[1]}`:String(v||'')};
-// The ROI target of the campaigns serving a cluster, weighted by its clicks in each. Campaigns on the "Existing" portfolio
-// bid to that portfolio's 155%.
-const PORTFOLIO_TARGET={Existing:1.55};
+// The ROI target of the campaigns serving a cluster, weighted by its clicks in each. Portfolio campaigns take their
+// portfolio's target: "Existing" bids to 155% (Perf), "New Non POI" to 105% (Google Ads bid strategy, 28 Oct). New POI and
+// Transition bid on maximise conversion value, whose target the Google Ads export leaves out, so they have none here.
+const PORTFOLIO_TARGET={Existing:1.55,'New Non POI':1.05};
 const campTarget=k=>k.troas||PORTFOLIO_TARGET[k.portfolio]||null;
 function targetOf(x){const L=(x.campaigns||[]).filter(k=>campTarget(k)), w=L.reduce((a,k)=>a+k.clicks,0);return w?L.reduce((a,k)=>a+campTarget(k)*k.clicks,0)/w:null}
 const sparkSvg=(vals,col)=>{const m=Math.max(1e-9,...vals);return vals.length>1?`<svg class="dspark" viewBox="0 0 150 30" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="${col}" stroke-width="1.5" stroke-linejoin="round" points="${vals.map((v,i)=>`${(i*150/(vals.length-1)).toFixed(1)},${(28-26*(v||0)/m).toFixed(1)}`).join(' ')}"/></svg>`:''};
