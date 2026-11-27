@@ -153,6 +153,9 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--dry-run", metavar="DIR")
     p.add_argument("--ces", help="comma-separated CE keys (ces.json); default every CE with a built page")
+    p.add_argument("--into", metavar="SPREADSHEET_ID",
+                   help="add the CEs' tabs to an existing content-check sheet instead of creating one; tabs already there "
+                        "and the reviewers' marks in them are left as they are, and their Checks rows are appended")
     a = p.parse_args()
     reg = json.loads((HERE / "ces.json").read_text())["ces"]
     if a.ces:
@@ -174,11 +177,37 @@ def main():
             (d / f"{re.sub(r'[^A-Za-z0-9]+', '_', t)}.json").write_text(json.dumps({"rows": rows, "fmt": fmt}, ensure_ascii=False, indent=0))
         print(f"dry run: {len(all_tabs)} tabs written to {d}")
         return
+    if a.into:
+        sid = a.into
+        have = {x["properties"]["title"]: x["properties"]["sheetId"] for x in gws("sheets", "spreadsheets", "get", "--params", json.dumps(
+            {"spreadsheetId": sid, "fields": "sheets.properties(title,sheetId)"}))["sheets"]}
+        listed = {str(r[1]) for r in gws("sheets", "spreadsheets", "values", "get", "--params", json.dumps(
+            {"spreadsheetId": sid, "range": "'Checks'!A2:B"})).get("values", []) if len(r) > 1}
+        new_checks = [r for r in checks if str(r[1]) not in listed]
+        if new_checks:
+            gws("sheets", "spreadsheets", "values", "append", "--params", json.dumps(
+                {"spreadsheetId": sid, "range": "'Checks'!A1", "valueInputOption": "RAW", "insertDataOption": "INSERT_ROWS"}),
+                body={"values": [[("" if v is None else v) for v in r] for r in new_checks]})
+        all_tabs = [x for x in tabs if x[0] not in have]
+        if not all_tabs:
+            print(f"nothing new; https://docs.google.com/spreadsheets/d/{sid}/edit")
+            return
+        added = gws("sheets", "spreadsheets", "batchUpdate", "--params", json.dumps({"spreadsheetId": sid}), body={"requests": [
+            {"addSheet": {"properties": {"title": t, "gridProperties": {"frozenRowCount": 1}}}} for t, _, _ in all_tabs]})
+        ids = {x["addSheet"]["properties"]["title"]: x["addSheet"]["properties"]["sheetId"] for x in added["replies"]}
+    else:
+        sid, ids = create_sheet(all_tabs)
+    write_tabs(sid, ids, all_tabs)
+
+
+def create_sheet(all_tabs):
     sheet = gws("sheets", "spreadsheets", "create", body={
         "properties": {"title": f"Clusters 3.0 · content check · {date.today():%d %b %Y}"},
         "sheets": [{"properties": {"title": t, "gridProperties": {"frozenRowCount": 0 if t == "Read me" else 1}}} for t, _, _ in all_tabs]})
-    sid = sheet["spreadsheetId"]
-    ids = {s["properties"]["title"]: s["properties"]["sheetId"] for s in sheet["sheets"]}
+    return sheet["spreadsheetId"], {s["properties"]["title"]: s["properties"]["sheetId"] for s in sheet["sheets"]}
+
+
+def write_tabs(sid, ids, all_tabs):
     for t, rows, _ in all_tabs:
         width = max((len(r) for r in rows), default=1)
         vals = [[("" if v is None else v) for v in r] + [""] * (width - len(r)) for r in rows]
