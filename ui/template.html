@@ -957,7 +957,7 @@ body{background:#f8f8f8}
    it stops against the Cluster column (--stk, that column's width, is set after each render). */
 .ctbl col.w-sticky{width:186px}.ctbl th.sticky,.ctbl td.sticky{min-width:186px;max-width:186px}
 .ctbl col.w-vol{width:100px}.ctbl col.w-status{width:130px}.ctbl col.w-fold{width:64px}.ctbl col.w-setup{width:190px}
-.ctbl col.w-prod{width:136px}.ctbl col.w-url{width:216px}.ctbl col.w-ptype{width:128px}
+.ctbl col.w-prod{width:136px}.ctbl col.w-url{width:216px}.ctbl col.w-ptype{width:128px}.ctbl col.w-cov{width:104px}.ctbl col.w-own{width:136px}
 .ctbl th.c-setup,.ctbl td.c-setup{position:sticky;left:var(--stk,186px);z-index:2;background:var(--bg);box-shadow:6px 0 8px -6px rgba(17,17,17,.18)}
 .ctbl thead th.c-setup{z-index:4}.ctbl tbody tr.row:hover td.c-setup{background:var(--panel)}.ctbl tbody tr.sel td.c-setup{background:var(--accent-soft)}
 .ctbl thead tr.g th.dec{color:var(--accent-ink)}
@@ -1073,7 +1073,7 @@ function entSlot(c,kind){
 const entNeeded=c=>['coll','poi'].some(k=>{const s=entSlot(c,k);return s.need&&s.state!=='none'});
 const entOk=c=>['coll','poi'].every(k=>{const s=entSlot(c,k);return !s.need||['found','created','none'].includes(s.state)});
 // Setup status only reports what the page type requires and what exists; the choices sit with Launch (entChoice).
-function entLine(c,kind){const s=entSlot(c,kind), L=kind==='coll'?'Collection':'POI', req=s.need?'required, ':'';
+function entLine(c,kind){const s=entSlot(c,kind), L=kind==='coll'?'Child collection':'POI', req=s.need?'required, ':'';
   if(s.state==='found')return['done',`${L}: ${req}${s.id}${s.name?' · '+s.name:''}${s.how==='page'?' (from its page)':s.how==='name'?' (matched by name)':' (picked)'}`];
   if(s.state==='created')return['todo',`${L}: to create · API pending`];
   if(s.state==='none')return['na',`${L}: ${s.by?'not needed, set by you':'not required'}`];
@@ -1085,7 +1085,7 @@ function entLines(c){const a=entSlot(c,'coll'),b=entSlot(c,'poi');
 /* The Collection or POI choice next to Launch, only where the page planning sheet requires one: the CE's entities of
    that type, a new child one, or not needed. */
 function entChoice(c,kind){const s=entSlot(c,kind);if(!s.need)return '';
-  const what=kind==='coll'?'Collection':'POI';
+  const what=kind==='coll'?'Child collection':'POI';
   if(s.state==='created')return `<span class="s">${what}: to create · API pending</span>`;
   const L=CE_ENTS().filter(e=>e.type===s.type), cur=s.state==='found'?String(s.id):s.state==='none'?'__none':'__new';
   const opts=L.map(e=>`<option value="${esc(String(e.id))}" ${cur===String(e.id)?'selected':''}>${esc(String(e.id))} · ${esc(e.name)}${e.active===false&&e.type==='collection'?' (inactive)':''}</option>`);
@@ -1331,7 +1331,7 @@ function setupSteps(c){
     L.push(sh>=.5?['done',`Ad group: own, ${pct(sh)} of clicks`]:a.state==='focus'?['warn','Ad group: focus keyword only']:a.ag?['warn',`Ad group: exists, ${pct(sh)} of clicks`]:['todo','Ad group: none of its own'])}
   return L}
 // Each Set-up step jumps to the column in the same row that holds its detail (opening that column's group if needed).
-const SGO=[[/^(Entity|Collection|POI):/,'ent'],[/^MB page:/,'page'],[/^Experiences:/,'prod'],[/^Ad group:/,'own']];
+const SGO=[[/^(Entity|Child collection|Collection|POI):/,'ent'],[/^MB page:/,'page'],[/^Experiences:/,'prod'],[/^Ad group:/,'own']];
 const setupCell=c=>{const L=setupSteps(c);if(!L.length)return '<span class="dim">–</span>';
   return `<span class="setup">${L.map(([st,t,x])=>{const go=(SGO.find(([re])=>re.test(t))||[])[1], ic=`<i aria-hidden="true">${st==='done'?'✓':st==='warn'?'!':st==='na'?'–':''}</i>`;
     const step=go&&COLBY[go]?`<button class="sstep su-${st} sgo" data-sgo="${go}|${c.id}" title="Go to ${esc(G[go]?.[0]||go)} in this row">${ic}<span>${esc(t)}</span></button>`:`<span class="sstep su-${st}">${ic}<span>${esc(t)}</span></span>`;
@@ -1607,11 +1607,11 @@ const ALLCOLS=[
    one click away in its group or the side panel. */
 /* Column order (27 Nov): what people read on the left, what they change next to Launch. The edit block runs in the order
    the page prompts do: is there a product (Supply), does it need its own page (Page URL), what kind (Page type, which
-   sets Launch's Collection and POI choices). Paid evidence folds next to Health, which it explains. */
+   sets Launch's Collection and POI choices). Coverage and Own ad group sit next to Health, which they explain; the other paid columns open from there. */
 const GROUPS=[
  {id:'demand',name:'Demand',main:['vol'],more:[]},
  {id:'state',name:'Health',main:['status'],more:[]},
- {id:'paid',name:'Paid',main:[],more:['cov','own','clicks','roi','wow','cvr','cpc','rpc','spend','impr','prev','cm1','cm1o','aimax','qs','shown','tkw','wroi']},
+ {id:'paid',name:'Paid',main:['cov','own'],more:['clicks','roi','wow','cvr','cpc','rpc','spend','impr','prev','cm1','cm1o','aimax','qs','shown','tkw','wroi']},
  {id:'setup',name:'Setup',main:['setup'],more:[]},
  {id:'prod',name:'Supply',main:['prod'],more:[]},
  {id:'page',name:'Page',main:['url','ptype'],more:['ent','rank','rev','share']},
@@ -1977,7 +1977,7 @@ function contentQueue(){
   const urlTd=c=>{if(c.pages.length){const mp=mainPage(c)||c.pages[0];return `${urlBtn(pathOf(mp),esc(shortPath(pathOf(mp))),pageHost(mp))}<div class="s">live page</div>`}
     return `<span class="purl" title="${esc(slugOf(c))}">${esc(slugOf(c))}</span><div class="s">${subdOn(c)?`subdomain ${esc(subdUrlOf(c))}`:'no subdomain'}</div>`};
   const ent=c=>{const L=['coll','poi'].map(k=>[k,entSlot(c,k)]).filter(([,s])=>s.need||s.state==='found');
-    return L.length?L.map(([k,s])=>`<div class="s">${k==='coll'?'Collection':'POI'}: ${s.state==='found'?esc(String(s.id))+' ✓':'to create · API pending'}</div>`).join(''):'<span class="s">not required</span>'};
+    return L.length?L.map(([k,s])=>`<div class="s">${k==='coll'?'Child collection':'POI'}: ${s.state==='found'?esc(String(s.id))+' ✓':'to create · API pending'}</div>`).join(''):'<span class="s">not required</span>'};
   const status=c=>c.pages.length?'<span class="pill ok">Live</span><div class="s">locked; changes in Payload</div>'
     :'<span class="pill warn">Recorded here</span><div class="s">not sent to Payload yet</div>';
   const waits=c=>{const L=pend(c).map(k=>`<b>Anuj's API</b>: create the child ${k==='coll'?'collection':'POI'}`);
@@ -2007,7 +2007,7 @@ function table(){
   // fixed column leaves the top cell empty, its column label says it.
   // Two halves: what the data says (left) and growth's decisions (right); each group's +N sits beside its column label.
   const EDIT=['prod','page'], DEC=[...EDIT,'next'], SG=shownGroups(), span=ids=>SG.filter(x=>ids(x.g.id)).reduce((a,x)=>a+x.keys.length,0);
-  const grp=`<tr class="g"><th class="sticky"></th><th colspan="${span(id=>!DEC.includes(id))}">Read · updates itself</th><th colspan="${span(id=>EDIT.includes(id))}" class="dec">Your edits</th><th class="dec c-lnch">Act</th></tr>`;
+  const grp=`<tr class="g"><th class="sticky"></th><th colspan="${span(id=>!DEC.includes(id)&&id!=='setup')}">Read · updates itself</th><th class="c-setup" colspan="${span(id=>id==='setup')}"></th><th colspan="${span(id=>EDIT.includes(id))}" class="dec">Your edits</th><th class="dec c-lnch">Act</th></tr>`;
   const h=grp+`<tr class="h">${sortTh('name',`Cluster <span class="cnt">${r.length} of ${live().length}</span>`,'sticky',S.sort)}${shownGroups().map(({g,keys})=>keys.map((key,i)=>key==='fold'?`<th class="fold gs">${g.name}${tog(g)}</th>`:sortTh(key,(key==='dstack'?'Own page · Launch':G[key][0])+tip(key)+(i===0?tog(g):''),(COLBY[key][1]||'')+(i===0?' gs':'')+' c-'+key+(DEC.includes(g.id)?' dec':''),S.sort)).join('')).join('')}</tr>`;
   const todo=c=>!OTHER(c)&&((needsSep(c)&&!sepConfirmed(c))||(!!ASKS_()[c.id]?.type&&!askState(c)));
   const rowHtml=(c,kind,extra)=>`<tr class="row ${kind||''} ${S.sel===c.id?'sel':''} " data-row="${c.id}"><td class="sticky"><div class="cn">${S.edit&&!OTHER(c)?`<input type="checkbox" class="pick" data-pick="${c.id}" ${S.pick.has(c.id)?'checked':''} aria-label="Select ${esc(nm(c))}">`:''}<div><button class="cnbtn" data-row="${c.id}"><b>${esc(kind==='kid'||kind==='kid last'?shortName(c,parentIdOf(c)):kind==='par'?topicOf(c):nm(c))}</b></button><div class="tags"><span class="pill it-${typeOf(c).toLowerCase()}">${TYPE[typeOf(c)]}</span>${edited(c)?'<span class="pill warn" title="Keywords changed here; paid and organic numbers update at the next run">Edited</span>':''}${openFlags(c.id).length?`<span class="flagt" title="${esc(openFlags(c.id).map(f=>f.text).join('\n'))}">Check: ${({fit:'fits another',split:'may split'})[String(openFlags(c.id)[0].id).split('|')[0]]||'flag'}${openFlags(c.id).length>1?` · ${openFlags(c.id).length}`:''}</span>`:''}${''}${S.sends.length&&S.sentSig[c.id]?(changedSince(c)?'<span class="pill warn">Changed since Send</span>':`${S.sentContent?.has(c.id)?'<span class="pill acc">With content</span>':''}${S.sentPerf?.has(c.id)?'<span class="pill acc">Sent to Perf</span>':''}`):''}${ncom(c)?`<span class="ccount">${ncom(c)} comment${ncom(c)>1?'s':''}</span>`:''}</div>${extra||''}</div></div></td>
@@ -3168,7 +3168,7 @@ document.addEventListener('change',e=>{const t=e.target, d=t.dataset;
   else if(d.entpick){const cut=d.entpick.lastIndexOf('|'),c=byId[d.entpick.slice(0,cut)],kind0=d.entpick.slice(cut+1),v=t.value;if(!v||!c)return;
     // The single "Entity: not needed" line asks which slot to create; the per-slot pickers set that slot.
     const kind=kind0==='any'?v:kind0,key=`${c.id}|${kind}`,had=key in S.ent,was=S.ent[key],to=kind0==='any'?'new':v==='__new'?'new':v==='__none'?'none':v==='__auto'?undefined:v;
-    if(to===undefined)delete S.ent[key];else S.ent[key]=to;const what=kind==='poi'?'POI':'Collection';
+    if(to===undefined)delete S.ent[key];else S.ent[key]=to;const what=kind==='poi'?'POI':'Child collection';
     logChange(`${what} for <b>${esc(nm(c))}</b>: ${to===undefined?'back to the filled-in answer':to==='new'?'create new on Launch':to==='none'?'not needed':esc(to)}`,()=>{if(had)S.ent[key]=was;else delete S.ent[key]})}
   else if(d.supply){const c=byId[d.supply],was=S.supply[c.id]||'';S.supply[c.id]=t.value;logChange(`Supply for <b>${esc(nm(c))}</b>: ${t.value?SUPPLY[t.value]:'not set'}`,()=>{S.supply[c.id]=was})}
   else if(d.perfall!==undefined){const L=live().filter(c=>!OTHER(c)),on=t.checked,was={...S.perfPick};L.forEach(c=>{S.perfPick[c.id]=on});logChange(on?`Ticked all ${L.length} clusters for Perf`:'Unticked every cluster for Perf',()=>{S.perfPick=was})}
