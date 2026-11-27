@@ -23,11 +23,11 @@
       "data": "milford.json",
       "page": "milford-clusters.html",
       "title": "Milford Sound Clusters",
-      "snapshot": "20261102_milford_full",
+      "snapshot": "final_milford",
       "runs": {
-        "pairs": "20261102-181325_mapping_20261102_milford_full",
-        "organic": "20261102-181342_mapping_20261102_milford_full",
-        "keywords": "20261102-181630_mapping_20261102_milford_full"
+        "pairs": "20261123-150432_final_pairs_3945",
+        "organic": "20261123-150432_final_organic_3945",
+        "keywords": "20261123-150432_final_keywords_3945"
       },
       "name_words": [
         "milford",
@@ -36,7 +36,9 @@
         "nz",
         "new",
         "zealand"
-      ]
+      ],
+      "clusters_from": "snapshots/ce_3945/final (original prompt)",
+      "head": "Milford Sound Cruise"
     },
     "325": {
       "slug": "parkguell",
@@ -48,9 +50,9 @@
       "title": "Park Güell Clusters",
       "snapshot": "20261030_parkguell_full",
       "runs": {
-        "pairs": "20261106-081100_mapping_20261030_parkguell_full",
-        "organic": "20261106-081112_mapping_20261030_parkguell_full",
-        "keywords": "20261106-081117_mapping_20261030_parkguell_full"
+        "pairs": "20261126-143132_mapping_20261030_parkguell_full",
+        "organic": "20261126-143142_mapping_20261030_parkguell_full",
+        "keywords": "20261126-143150_mapping_20261030_parkguell_full"
       },
       "name_words": [
         "park",
@@ -62,7 +64,10 @@
         "gaudi",
         "barcelona"
       ],
-      "head": "Park Güell"
+      "head": "Park Güell",
+      "page_prefixes": [
+        "www.barcelona-tickets.com.park-guell"
+      ]
     },
     "2743": {
       "slug": "greatbarrierreef",
@@ -77,13 +82,16 @@
         "great",
         "reef"
       ],
-      "snapshot": "20261030_greatbarrierreefcrui_full",
+      "snapshot": "20261030_greatbarrierreef_full",
       "runs": {
-        "pairs": "20261119-022806_mapping_20261030_greatbarrierreefcrui_full",
-        "organic": "20261119-022813_mapping_20261030_greatbarrierreefcrui_full",
-        "keywords": "20261119-022817_mapping_20261030_greatbarrierreefcrui_full"
+        "pairs": "20261126-143448_mapping_20261030_greatbarrierreef_full",
+        "organic": "20261126-143454_mapping_20261030_greatbarrierreef_full",
+        "keywords": "20261126-143459_mapping_20261030_greatbarrierreef_full"
       },
-      "head": "Great Barrier Reef"
+      "head": "Great Barrier Reef",
+      "page_prefixes": [
+        "www.cairnstickets.com.great-barrier-reef"
+      ]
     },
     "1695": {
       "slug": "sydneywhalewatching",
@@ -106,6 +114,376 @@
       },
       "clusters_from": "snapshots/ce_1695/final (original prompt)",
       "head": "Sydney Whale Watching"
+    },
+    "900001": {
+      "slug": "watersportsphuket",
+      "name": "Water Sports - Phuket",
+      "host": "www.no-microbrand.invalid",
+      "out": "hybrid_watersportsphuket",
+      "data": "watersportsphuket.json",
+      "page": "watersportsphuket-clusters.html",
+      "title": "Water Sports - Phuket Clusters",
+      "name_words": [
+        "phuket",
+        "sports",
+        "water"
+      ],
+      "eos_id": "10 - Phuket",
+      "head": "Phuket Water Sports",
+      "snapshot": "final_watersportsphuket",
+      "runs": {
+        "pairs": "20261124-135754_final_pairs_900001",
+        "organic": "20261124-135754_final_organic_900001",
+        "keywords": "20261124-135754_final_keywords_900001"
+      },
+      "clusters_from": "snapshots/ce_10 - Phuket/final (original prompt)"
+    },
+    "6756": {
+      "slug": "fijiislandsday",
+      "name": "Fiji Islands Day Tours",
+      "host": "www.fijitickets.com",
+      "out": "hybrid_fijiislandsday",
+      "data": "fijiislandsday.json",
+      "page": "fijiislandsday-clusters.html",
+      "title": "Fiji Islands Day Tours Clusters",
+      "name_words": [
+        "day",
+        "fiji",
+        "islands"
+      ],
+      "snapshot": "final_fijiislandsday",
+      "runs": {
+        "pairs": "20261124-163237_final_pairs_6756",
+        "organic": "20261124-163237_final_organic_6756",
+        "keywords": "20261124-163237_final_keywords_6756"
+      },
+      "clusters_from": "snapshots/ce_6756/final (original prompt)",
+      "head": "Fiji Weather"
+    },
+    "2405": {
+      "slug": "phiphiisland",
+      "name": "Phi Phi Island Tours",
+      "host": "www.phiphi-islands-tours.com",
+      "out": "hybrid_phiphiisland",
+      "data": "phiphiisland.json",
+      "page": "phiphiisland-clusters.html",
+      "title": "Phi Phi Island Tours Clusters",
+      "name_words": [
+        "island",
+        "phi"
+      ],
+      "snapshot": "final_phiphiisland",
+      "runs": {
+        "pairs": "20261124-144754_final_pairs_2405",
+        "organic": "20261124-144754_final_organic_2405",
+        "keywords": "20261124-144754_final_keywords_2405"
+      },
+      "clusters_from": "snapshots/ce_2405/final (original prompt)",
+      "head": "Phi Phi Islands"
+    },
+    "900002": {
+      "slug": "keywest",
+      "name": "Cruises - Key West",
+      "host": "www.no-microbrand.invalid",
+      "out": "hybrid_keywest",
+      "data": "keywest.json",
+      "page": "keywest-clusters.html",
+      "title": "Cruises - Key West Clusters",
+      "name_words": [
+        "key",
+        "west"
+      ],
+      "eos_id": "18 - Key West",
+      "snapshot": "final_keywest",
+      "runs": {
+        "pairs": "20261124-145054_final_pairs_900002",
+        "organic": "20261124-145054_final_organic_900002",
+        "keywords": "20261124-145054_final_keywords_900002"
+      },
+      "clusters_from": "snapshots/ce_18 - Key West/final (original prompt)",
+      "head": "Cruises to Key West Florida"
+    },
+    "6835": {
+      "slug": "picton",
+      "name": "Picton Tours",
+      "host": "www.no-microbrand.invalid",
+      "out": "hybrid_picton",
+      "data": "picton.json",
+      "page": "picton-clusters.html",
+      "title": "Picton Tours Clusters",
+      "name_words": [
+        "picton"
+      ],
+      "snapshot": "final_picton",
+      "runs": {
+        "pairs": "20261124-145403_final_pairs_6835",
+        "organic": "20261124-145403_final_organic_6835",
+        "keywords": "20261124-145403_final_keywords_6835"
+      },
+      "clusters_from": "snapshots/ce_6835/final (original prompt)",
+      "head": "Marlborough Sounds Tours"
+    },
+    "900003": {
+      "slug": "losangeles",
+      "name": "Cruises - Los Angeles",
+      "host": "www.no-microbrand.invalid",
+      "out": "hybrid_losangeles",
+      "data": "losangeles.json",
+      "page": "losangeles-clusters.html",
+      "title": "Cruises - Los Angeles Clusters",
+      "name_words": [
+        "angeles",
+        "los"
+      ],
+      "eos_id": "18 - Los Angeles",
+      "snapshot": "final_losangeles",
+      "runs": {
+        "pairs": "20261124-145649_final_pairs_900003",
+        "organic": "20261124-145649_final_organic_900003",
+        "keywords": "20261124-145649_final_keywords_900003"
+      },
+      "clusters_from": "snapshots/ce_18 - Los Angeles/final (original prompt)",
+      "head": "Harbor Breeze Cruises"
+    },
+    "2835": {
+      "slug": "daintreenationalpark",
+      "name": "Daintree National Park",
+      "host": "www.cairnstickets.com",
+      "out": "hybrid_daintreenationalpark",
+      "data": "daintreenationalpark.json",
+      "page": "daintreenationalpark-clusters.html",
+      "title": "Daintree National Park Clusters",
+      "name_words": [
+        "daintree",
+        "national",
+        "park"
+      ],
+      "snapshot": "final_daintreenationalpark",
+      "runs": {
+        "pairs": "20261124-145921_final_pairs_2835",
+        "organic": "20261124-145921_final_organic_2835",
+        "keywords": "20261124-145921_final_keywords_2835"
+      },
+      "clusters_from": "snapshots/ce_2835/final (original prompt)",
+      "head": "Daintree Rainforest"
+    },
+    "5720": {
+      "slug": "atvadventurephuket",
+      "name": "ATV Adventure Phuket",
+      "host": "www.phuket-tickets.com",
+      "out": "hybrid_atvadventurephuket",
+      "data": "atvadventurephuket.json",
+      "page": "atvadventurephuket-clusters.html",
+      "title": "ATV Adventure Phuket Clusters",
+      "name_words": [
+        "adventure",
+        "atv",
+        "phuket"
+      ],
+      "head": "Phuket ATV",
+      "snapshot": "final_atvadventurephuket",
+      "runs": {
+        "pairs": "20261124-150219_final_pairs_5720",
+        "organic": "20261124-150219_final_organic_5720",
+        "keywords": "20261124-150219_final_keywords_5720"
+      },
+      "clusters_from": "snapshots/ce_5720/final (original prompt)"
+    },
+    "3097": {
+      "slug": "everglades",
+      "name": "Everglades",
+      "host": "www.everglades-tickets.com",
+      "out": "hybrid_everglades",
+      "data": "everglades.json",
+      "page": "everglades-clusters.html",
+      "title": "Everglades Clusters",
+      "name_words": [
+        "everglades"
+      ],
+      "head": "Everglades",
+      "snapshot": "final_everglades",
+      "runs": {
+        "pairs": "20261127-122517_final_pairs_3097",
+        "organic": "20261127-122517_final_organic_3097",
+        "keywords": "20261127-122517_final_keywords_3097"
+      },
+      "clusters_from": "snapshots/ce_3097/final (original prompt)"
+    },
+    "2554": {
+      "slug": "niagarafallscanada",
+      "name": "Niagara Falls (Canada) Tours",
+      "host": "www.niagara-tours.com",
+      "out": "hybrid_niagarafallscanada",
+      "data": "niagarafallscanada.json",
+      "page": "niagarafallscanada-clusters.html",
+      "title": "Niagara Falls (Canada) Tours Clusters",
+      "name_words": [
+        "canada",
+        "falls",
+        "niagara"
+      ],
+      "head": "Niagara Falls Canada",
+      "snapshot": "final_niagarafallscanada",
+      "runs": {
+        "pairs": "20261127-124611_final_pairs_2554",
+        "organic": "20261127-124611_final_organic_2554",
+        "keywords": "20261127-124611_final_keywords_2554"
+      },
+      "clusters_from": "snapshots/ce_2554/final (original prompt)"
+    },
+    "6677": {
+      "slug": "kangarooisland",
+      "name": "Kangaroo Island Tours",
+      "host": "www.kangaroo-island-tours.com",
+      "out": "hybrid_kangarooisland",
+      "data": "kangarooisland.json",
+      "page": "kangarooisland-clusters.html",
+      "title": "Kangaroo Island Tours Clusters",
+      "name_words": [
+        "island",
+        "kangaroo"
+      ],
+      "head": "Kangaroo Island",
+      "snapshot": "final_kangarooisland",
+      "runs": {
+        "pairs": "20261127-131515_final_pairs_6677",
+        "organic": "20261127-131515_final_organic_6677",
+        "keywords": "20261127-131515_final_keywords_6677"
+      },
+      "clusters_from": "snapshots/ce_6677/final (original prompt)"
+    },
+    "3646": {
+      "slug": "portarthurhistoricsite",
+      "name": "Port Arthur Historic Site",
+      "host": "www.hobart-tours.com",
+      "out": "hybrid_portarthurhistoricsite",
+      "data": "portarthurhistoricsite.json",
+      "page": "portarthurhistoricsite-clusters.html",
+      "title": "Port Arthur Historic Site Clusters",
+      "name_words": [
+        "arthur",
+        "historic",
+        "port",
+        "site"
+      ],
+      "head": "Port Arthur Historic Site",
+      "snapshot": "final_portarthurhistoricsite",
+      "runs": {
+        "pairs": "20261127-124926_final_pairs_3646",
+        "organic": "20261127-124926_final_organic_3646",
+        "keywords": "20261127-124926_final_keywords_3646"
+      },
+      "clusters_from": "snapshots/ce_3646/final (original prompt)"
+    },
+    "1642": {
+      "slug": "melbournetogreatoceanroa",
+      "name": "Melbourne To Great Ocean Road Tours",
+      "host": "www.tickets-melbourne.com",
+      "out": "hybrid_melbournetogreatoceanroa",
+      "data": "melbournetogreatoceanroa.json",
+      "page": "melbournetogreatoceanroa-clusters.html",
+      "title": "Melbourne To Great Ocean Road Tours Clusters",
+      "name_words": [
+        "great",
+        "melbourne",
+        "ocean",
+        "road"
+      ],
+      "head": "Great Ocean Road",
+      "snapshot": "final_melbournetogreatoceanroa",
+      "runs": {
+        "pairs": "20261127-124600_final_pairs_1642",
+        "organic": "20261127-124600_final_organic_1642",
+        "keywords": "20261127-124600_final_keywords_1642"
+      },
+      "clusters_from": "snapshots/ce_1642/final (original prompt)"
+    },
+    "2402": {
+      "slug": "jamesbondisland",
+      "name": "James Bond Island Tours",
+      "host": "www.jamesbondisland-tours.com",
+      "out": "hybrid_jamesbondisland",
+      "data": "jamesbondisland.json",
+      "page": "jamesbondisland-clusters.html",
+      "title": "James Bond Island Tours Clusters",
+      "name_words": [
+        "bond",
+        "island",
+        "james"
+      ],
+      "head": "James Bond Island",
+      "snapshot": "final_jamesbondisland",
+      "runs": {
+        "pairs": "20261127-123418_final_pairs_2402",
+        "organic": "20261127-123418_final_organic_2402",
+        "keywords": "20261127-123418_final_keywords_2402"
+      },
+      "clusters_from": "snapshots/ce_2402/final (original prompt)"
+    },
+    "528": {
+      "slug": "grandcanyon",
+      "name": "Grand Canyon Tours",
+      "host": "www.grand-canyon-tours.com",
+      "out": "hybrid_grandcanyon",
+      "data": "grandcanyon.json",
+      "page": "grandcanyon-clusters.html",
+      "title": "Grand Canyon Tours Clusters",
+      "name_words": [
+        "canyon",
+        "grand"
+      ],
+      "head": "Grand Canyon",
+      "snapshot": "final_grandcanyon",
+      "runs": {
+        "pairs": "20261124-164932_final_pairs_528",
+        "organic": "20261124-164932_final_organic_528",
+        "keywords": "20261124-164932_final_keywords_528"
+      },
+      "clusters_from": "snapshots/ce_528/final (original prompt)",
+      "other_terms": "grand canyon"
+    },
+    "3697": {
+      "slug": "brisbanetofraserisland",
+      "name": "Brisbane to Fraser Island Tours",
+      "host": "www.fraser-island-tours.com",
+      "out": "hybrid_brisbanetofraserisland",
+      "data": "brisbanetofraserisland.json",
+      "page": "brisbanetofraserisland-clusters.html",
+      "title": "Brisbane to Fraser Island Tours Clusters",
+      "name_words": [
+        "brisbane",
+        "fraser",
+        "island"
+      ],
+      "head": "Fraser Island",
+      "snapshot": "final_brisbanetofraserisland",
+      "runs": {
+        "pairs": "20261127-125355_final_pairs_3697",
+        "organic": "20261127-125355_final_organic_3697",
+        "keywords": "20261127-125355_final_keywords_3697"
+      },
+      "clusters_from": "snapshots/ce_3697/final (original prompt)"
+    },
+    "6072": {
+      "slug": "pearlharbor",
+      "name": "Pearl Harbor",
+      "host": "www.tickets-hawaii.com",
+      "out": "hybrid_pearlharbor",
+      "data": "pearlharbor.json",
+      "page": "pearlharbor-clusters.html",
+      "title": "Pearl Harbor Clusters",
+      "name_words": [
+        "harbor",
+        "pearl"
+      ],
+      "head": "Pearl Harbor",
+      "snapshot": "final_pearlharbor",
+      "runs": {
+        "pairs": "20261127-130949_final_pairs_6072",
+        "organic": "20261127-130949_final_organic_6072",
+        "keywords": "20261127-130949_final_keywords_6072"
+      },
+      "clusters_from": "snapshots/ce_6072/final (original prompt)"
     }
   }
 }
