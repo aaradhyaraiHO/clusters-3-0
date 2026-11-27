@@ -1,4 +1,4 @@
--- Google Ads search sessions on the __NAME__ microbrand (CE __CE__) by entry page, 30 Jul to 27 Oct 2026: how many
+-- Google Ads search sessions on the __NAME__ microbrand (CE __CE__) by entry page, the pull window (window.py): how many
 -- reach a product (select) page, start checkout and order. The funnel model has one row per page event, so a
 -- session is rebuilt here and its entry page is its first page.
 -- Filtered by the microbrand's domain, not combined_entity_id: Mixpanel files a page under its own collection
@@ -16,8 +16,8 @@ WITH events AS (
 
     FROM `headout-analytics.analytics_reporting.mixpanel_user_page_funnel_progression`
 
-    WHERE event_date >= '2026-07-30'
-          AND event_date <= '2026-10-27'
+    WHERE event_date >= '__START__'
+          AND event_date <= '__END__'
           AND REGEXP_CONTAINS(page_url, r'^https?://(www\.)?__SITE_RE__/')
           AND channel_name = 'Google Ads'
           AND advertising_channel_type = 'SEARCH'

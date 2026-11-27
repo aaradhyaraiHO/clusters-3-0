@@ -4,7 +4,7 @@ Steps (each writes into snapshots/ce_<ce>/; --from <step> resumes):
   pull     EOS keywords (BigQuery clusters_3_0_eos_keywords_clean, competitors removed), the CE's paid search terms
            (Google Ads, last 90 days to the latest partition) and organic queries (Search Console: headout.com pages
            matching page_regex, plus the CE's microbrand sites). CE metadata comes from ce_sources.csv.
-  cluster  Harsha's EOS clusters prompt (prompts/eos_harsha_2026-11-18/clusters.md) on the keywords: the Messages API
+  cluster  Harsha's EOS clusters prompt (prompts/eos/clusters.md, synced from the prompts doc by sync_prompts.py) on the keywords: the Messages API
            (claude-opus-5-5, effort medium, 64K output, JSON only) when credentials exist, else `claude -p` with the same
            settings; --runs N keeps the run whose clusters agree most with the others.
   convert  harsha_to_clusters.py: cluster list, EOS-style keyword assignment, one definition per cluster.
@@ -31,7 +31,7 @@ import runlib
 
 STEPS = ["pull", "cluster", "convert", "place", "judge", "score", "export"]
 HERE = runlib.HERE
-PROMPTS = {"original": HERE / "prompts" / "eos_harsha_2026-11-18" / "clusters.md",
+PROMPTS = {"original": HERE / "prompts" / "eos" / "clusters.md",
            "patched": HERE / "prompts" / "eos_harsha_2026-11-18" / "clusters_patched.md"}
 PROMPT = PROMPTS["original"]
 PY = sys.executable
@@ -41,7 +41,8 @@ D = "headout-dev.dbt_aaradhya"
 def bq(sql):
     # bq runs on a copy of the gcloud config (the sandbox cannot write the original); refresh it every run so a new
     # `gcloud auth login` is picked up instead of an expired copy
-    tmp = Path(os.environ.get("TMPDIR", "/tmp")) / "gcloud"
+    # One copy per process: CEs run in parallel, and a shared copy is deleted under another run's feet.
+    tmp = Path(os.environ.get("TMPDIR", "/tmp")) / f"gcloud_{os.getpid()}"
     shutil.rmtree(tmp, ignore_errors=True)
     shutil.copytree(Path.home() / ".config" / "gcloud", tmp, symlinks=True, ignore=shutil.ignore_patterns("virtenv", "logs"))
     res = subprocess.run(["bq", "query", "--use_legacy_sql=false", "--location=EU", "--project_id=headout-dev", "--format=csv",
@@ -53,23 +54,44 @@ def bq(sql):
     return pd.read_csv(StringIO(res.stdout), dtype={"ce": str}) if res.stdout.strip() else pd.DataFrame()
 
 
-def pull(ce, src, snap):
+def pull(ce, src, snap, keywords="eos"):
+    if keywords == "own":
+        # research_ce.py wrote the keyword list (seeds prompt + Keyword Planner) for a CE EOS has not researched.
+        if not (snap / "eos_keywords.csv").exists():
+            raise SystemExit(f"CE {ce}: run research_ce.py first, or use --keywords eos")
+        kw = pd.read_csv(snap / "eos_keywords.csv", dtype={"ce": str})
+    else:
+        kw = eos_keywords(ce)
+        kw.dropna(subset=["term"]).to_csv(snap / "eos_keywords.csv", index=False)
+    pull_searches(ce, src, snap, kw)
+
+
+def eos_keywords(ce):
     kw = bq(f"""SELECT ce_id AS ce, keyword AS term, MAX(volume) AS vol FROM `{D}.clusters_3_0_eos_keywords_clean`
                 WHERE ce_id = '{ce}' AND NOT is_competitor GROUP BY 1, 2""")
     if kw.empty:
         old = pd.read_csv(runlib.SNAPSHOTS / "20261030_validation_v2" / "eos_keywords.csv", dtype={"ce": str})
         kw = old[old["ce"] == ce]
         if kw.empty:
-            raise SystemExit(f"CE {ce} has no EOS keyword research in BigQuery: run EOS on it first")
+            raise SystemExit(f"CE {ce} has no EOS keyword research in BigQuery: run research_ce.py, then --keywords own")
         print(f"pull: no EOS list in BigQuery for {ce}; using the keyword set from the validation snapshot")
-    kw.dropna(subset=["term"]).to_csv(snap / "eos_keywords.csv", index=False)
+    return kw
+
+
+def pull_searches(ce, src, snap, kw):
     window = """(SELECT MAX(_PARTITIONTIME) FROM `segment-data.google_adwords_prepaid.p_ads_Campaign_6251119615`
                  WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY))"""
+    # other_terms (ce_sources.csv): the CE's searches that other campaigns buy count too (Grand Canyon's are bought by a
+    # Las Vegas helicopter campaign), so they are placed like its own. Only searches matching it, never a whole campaign.
+    other = str(src.get("other_terms") or "").strip()
+    scope = f"(campaigns.own OR REGEXP_CONTAINS(LOWER(stats.search_term_view_search_term), r'{other}'))" if other else "campaigns.own"
     paid = bq(f"""
         WITH latest AS (SELECT {window} AS t),
         campaigns AS (
-            SELECT DISTINCT campaign_id FROM `segment-data.google_adwords_prepaid.p_ads_Campaign_6251119615`
-            WHERE _PARTITIONTIME = (SELECT t FROM latest) AND REGEXP_EXTRACT(campaign_name, r'cid(\\d+)\\b') = '{ce}')
+            SELECT campaign_id, LOGICAL_OR(REGEXP_EXTRACT(campaign_name, r'cid(\\d+)\\b') = '{ce}') AS own
+            FROM `segment-data.google_adwords_prepaid.p_ads_Campaign_6251119615`
+            WHERE _PARTITIONTIME = (SELECT t FROM latest)
+            GROUP BY 1)
         SELECT '{ce}' AS ce, LOWER(stats.search_term_view_search_term) AS term, SUM(stats.metrics_impressions) AS impr,
             SUM(stats.metrics_clicks) AS clicks, ROUND(SUM(stats.metrics_cost_micros) / 1e6, 2) AS spend,
             ROUND(SUM(stats.metrics_conversions), 2) AS conv, ROUND(SUM(stats.metrics_conversions_value), 2) AS conv_value
@@ -77,7 +99,11 @@ def pull(ce, src, snap):
         INNER JOIN campaigns USING (campaign_id)
         WHERE stats._PARTITIONTIME BETWEEN TIMESTAMP_SUB((SELECT t FROM latest), INTERVAL 90 DAY) AND (SELECT t FROM latest)
               AND stats.segments_ad_network_type = 'SEARCH'
+              AND {scope}
         GROUP BY 1, 2 HAVING impr >= 3 OR clicks > 0""")
+    # A CE with no campaigns (or no Search Console pages) still gets the file with its columns, so later steps read 0 rows.
+    if paid.empty:
+        paid = pd.DataFrame(columns=["ce", "term", "impr", "clicks", "spend", "conv", "conv_value"])
     paid.to_csv(snap / "pair_terms.csv", index=False)
     sites = [s for s in str(src.get("gsc_sites") or "").split() if s]
     site_list = ", ".join(f"'{s}'" for s in ["https://www.headout.com/", *sites])
@@ -90,7 +116,13 @@ def pull(ce, src, snap):
         FROM `headout-analytics.analytics_staging.stg_search_console__keyword_page_performance`
         WHERE report_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 92 DAY) AND search_type = 'web' AND site IN ({site_list})
               AND (REGEXP_CONTAINS(page, r'{rx}') OR (site != 'https://www.headout.com/' AND REGEXP_CONTAINS(site, r'{rx}')))
+              -- English pages only: no language folder such as /it/ or /pt-br/ (ui/english.py). Paid searches are filtered by
+              -- language in the UI export, search terms first, so every campaign is pulled.
+              AND (NOT REGEXP_CONTAINS(page, r'^https?://[^/]+/[a-z]{{2}}(-[a-z]{{2,4}})?(/|$)')
+                   OR REGEXP_CONTAINS(page, r'^https?://[^/]+/en(/|$)'))
         GROUP BY 1, 2 HAVING SUM(count_clicks) > 0 OR SUM(count_impressions) >= 50""")
+    if org.empty:
+        org = pd.DataFrame(columns=["ce", "term", "clicks", "impressions", "avg_position", "clicks_microbrand", "top_page", "spend", "conv"])
     org.to_csv(snap / "gsc_terms.csv", index=False)
     pd.DataFrame([{"ce": ce, "name": src["name"], "city": src["city"]}]).to_csv(snap / "ce_names.csv", index=False)
     print(f"pull: {len(kw)} keywords, {len(paid)} paid searches, {len(org)} organic queries")
@@ -187,11 +219,17 @@ def pair_agreement(a, b):
     return sum((ma[x] == ma[y]) == (mb[x] == mb[y]) for x, y in pairs) / max(1, len(pairs))
 
 
+def negatives(ce):
+    """The clusters prompt's negative keywords for a CE: negative_keywords.json's terms for every CE, plus its own."""
+    n = json.loads((HERE / "negative_keywords.json").read_text())
+    return list(dict.fromkeys(n["all"] + n.get("by_ce", {}).get(str(ce), [])))
+
+
 def cluster(ce, src, snap, runs, llm):
     global pack_keywords
     kw = pd.read_csv(snap / "eos_keywords.csv").sort_values("vol", ascending=False)
     pack = {"ceName": src["name"], "ceCity": src["city"], "ceCountry": src["country"], "ceSubcat": src["subcat"],
-            "negativeKeywords": [], "keywordData": [{"keyword": t, "searchVolume": int(v) if pd.notna(v) else 0}
+            "negativeKeywords": negatives(ce), "keywordData": [{"keyword": t, "searchVolume": int(v) if pd.notna(v) else 0}
                                                     for t, v in zip(kw["term"], kw["vol"])]}
     pack_keywords = [k["keyword"] for k in pack["keywordData"]]
     (snap / "inputs").mkdir(exist_ok=True)
@@ -213,7 +251,8 @@ def cluster(ce, src, snap, runs, llm):
 
 
 def runs_from(stdout):
-    return re.findall(r"run (\S+_jev_classify_\S+?):", stdout)
+    # A placeholder CE id ("10 - Phuket") puts spaces in the snapshot name, so the run id is read up to its colon.
+    return re.findall(r"run (\d{8}-\d{6}_jev_classify_[^:\n]+):", stdout)
 
 
 def place(ce, snap):
@@ -226,6 +265,8 @@ def place(ce, snap):
         if kind != "keywords" and len(pd.read_csv(snap / extra[1])) == 0:
             print(f"place: no {kind} searches")
             continue
+        # Run ids are stamped to the second (runlib); a cached run can finish within the same second as the next starts.
+        time.sleep(1.1)
         res = subprocess.run(base + extra, capture_output=True, text=True, cwd=HERE)
         if res.returncode:
             raise SystemExit(f"place {kind} failed:\n{res.stderr[-1500:]}")
@@ -318,9 +359,21 @@ def export(ce, snap, state):
         keep = {"keywords": ["keyword", "vol"], "paid": ["search", "impr", "clicks", "spend", "conv", "conv_value"],
                 "organic": ["search", "clicks", "impressions", "avg_position", "top_page"]}[kind]
         a = a[[c for c in keep if c in a] + ["cluster", "confidence"]].rename(columns={"vol": "volume"})
+        if kind == "keywords":
+            # Jev places every keyword by meaning and knows nothing of the negative keywords, so a keyword naming a
+            # competitor is taken out of its cluster here. Paid and organic searches keep their cluster: they are
+            # clicks the CE's own ads and pages really got.
+            from harsha_to_clusters import claims, norm
+            neg = [norm(n) for n in negatives(ce)]
+            a.loc[a["keyword"].map(lambda k: any(claims(n, norm(str(k))) for n in neg)), "cluster"] = None
         a.insert(0, "ce", ce)
         a.to_csv(fin / f"{kind}.csv", index=False)
         out[kind] = a
+    # A CE with no paid or organic searches still gets the file with its columns, so the UI reads 0 rows.
+    for kind, cols in {"paid": ["ce", "search", "impr", "clicks", "spend", "conv", "conv_value", "cluster", "confidence"],
+                       "organic": ["ce", "search", "clicks", "impressions", "avg_position", "top_page", "cluster", "confidence"]}.items():
+        if kind not in out:
+            pd.DataFrame(columns=cols).to_csv(fin / f"{kind}.csv", index=False)
     kw = out.get("keywords", pd.DataFrame(columns=["keyword", "volume", "cluster"]))
     rows = []
     for r in meta.itertuples():
@@ -341,6 +394,8 @@ def main():
     p.add_argument("--llm", choices=["auto", "api", "cli"], default="auto",
                    help="api: Anthropic Messages API (needs ANTHROPIC_API_KEY or `ant auth login`); cli: `claude -p`; auto: API when credentials exist")
     p.add_argument("--prompt", choices=list(PROMPTS), default="original", help="Harsha's prompt as written, or with the Clusters 3.0 overrides")
+    p.add_argument("--keywords", choices=["eos", "own"], default="eos",
+                   help="eos: EOS's keyword research from the MMP tool; own: research_ce.py's list for a CE EOS has not researched")
     p.add_argument("--runs", type=int, default=1, help="prompt runs; with 3, keep the run that agrees most with the others")
     a = p.parse_args()
     srcs = pd.read_csv(HERE / "ce_sources.csv", dtype={"ce": str}).fillna("").set_index("ce")
@@ -356,7 +411,7 @@ def main():
     for step in STEPS[STEPS.index(a.start):]:
         print(f"== {step}", flush=True)
         if step == "pull":
-            pull(a.ce, src, snap)
+            pull(a.ce, src, snap, a.keywords)
         elif step == "cluster":
             state["cluster"] = cluster(a.ce, src, snap, a.runs, a.llm)
         elif step == "convert":

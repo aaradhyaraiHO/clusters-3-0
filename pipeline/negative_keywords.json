@@ -1,0 +1,6 @@
+{
+ "about": "Negative keywords for the clusters prompt (its Negative_Keywords input): a keyword containing any of these as whole words is excluded from clustering. 'all' applies to every CE, 'by_ce' adds terms for one CE. The first part of 'all' is the competitor list EOS cleans its keyword lists with (is_competitor in bq/eos_base.sql); keep the two in step.",
+ "all": ["tiqets", "getyourguide", "get your guide", "gyg", "klook", "viator", "musement", "civitatis", "tripadvisor", "city wonders",
+         "walks of italy", "headout", "go city", "isango", "airbnb", "groupon", "experienceoz", "experience oz", "expedia"],
+ "by_ce": {}
+}

@@ -1,0 +1,46 @@
+{
+  "doc_id": "11zGWxtkUWHOlmbfE2OkowshAXTGNTcrkQNRb1QXEzkg",
+  "doc_title": "KW clusters 3.0 prompts",
+  "revision_id": "AHj4eMQxm1mV1JAUMYiVeODpORmaR8tfvpdSA36uu7iQJ3dPkw9xKZbkUEbOIxncviyrR65gZk6iCI03jMihIYfTMJ4ShTojcwe_HWMcY4k",
+  "synced_at": "2026-11-24T06:46:47+00:00",
+  "files": {
+    "clusters.md": {
+      "sha256": "d316fe348a78",
+      "vectorshift": [
+        "https://app.vectorshift.ai/pipelines/6a44ca4aa6ea3fb50b83a7cd?folder=6a44ca28a6ea3fb50b836e54&branch=6a44ca4aa6ea3fb50b83a816"
+      ]
+    },
+    "page_mapping.md": {
+      "sha256": "bae91edd4015",
+      "vectorshift": [
+        "https://app.vectorshift.ai/pipelines/6b02d6a23298619c866fb150?folder=6a44ca28a6ea3fb50b836e54&branch=6b02d6a23298619c866fb1b8"
+      ]
+    },
+    "page_type.md": {
+      "sha256": "09ba75be5f05",
+      "vectorshift": [
+        "https://app.vectorshift.ai/pipelines/6b0302513298619c8694abf1?folder=6a44ca28a6ea3fb50b836e54&branch=6b0302513298619c8694ac55"
+      ]
+    },
+    "seeds.md": {
+      "sha256": "c7e523f5676d",
+      "vectorshift": [
+        "https://app.vectorshift.ai/pipelines/6a44c7e5a6ea3fb50b806dbb?folder=6a44ca28a6ea3fb50b836e54&branch=6a44c7e5a6ea3fb50b806dbc"
+      ]
+    },
+    "separate_page.md": {
+      "sha256": "663999943e43",
+      "vectorshift": [
+        "https://app.vectorshift.ai/pipelines/6b0324073298619c86b7f234?folder=6a44ca28a6ea3fb50b836e54&branch=6b0324073298619c86b7f291"
+      ]
+    },
+    "vendor_noise_filter.md": {
+      "sha256": "fb0280656941",
+      "vectorshift": []
+    },
+    "vendor_seeds.md": {
+      "sha256": "0c6386d52fa4",
+      "vectorshift": []
+    }
+  }
+}

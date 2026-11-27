@@ -22,18 +22,20 @@ COPIED = ["ad_groups", "campaigns", "ce_names", "cluster_keywords", "gsc_terms",
 RUNS = {"pairs": "pair_terms.csv", "organic": "gsc_terms.csv", "keywords": "ad_keywords.csv"}
 
 
-def build_snapshot(root, ce, name):
-    src, dst = root / "snapshots" / SOURCE, LOCAL / "snapshots" / name
+def build_snapshot(root, ce, name, source=None, source_ce=None):
+    """source: a snapshot folder holding the CE (snapshot_ce.py writes one for a CE outside the 30 Oct snapshot);
+    source_ce: the CE's id in that folder when the tool keys it by a stand-in number."""
+    src, dst = source or root / "snapshots" / SOURCE, LOCAL / "snapshots" / name
     dst.mkdir(parents=True, exist_ok=True)
     rows = {}
     for f in COPIED:
         d = pd.read_csv(src / f"{f}.csv", dtype={"ce": str}, low_memory=False)
-        rows[f] = d[d["ce"] == ce]
+        rows[f] = d[d["ce"] == (source_ce or ce)].assign(ce=ce)
         rows[f].to_csv(dst / f"{f}.csv", index=False)
     rows["pair_terms"][["ce", "term", "clicks", "spend", "conv", "impr"]].to_csv(dst / "search_terms.csv", index=False)
     # The mapper only matches ad keywords by text; spend and conversions stay 0 here, as in Milford's first snapshot.
     rows["keyword_terms"].assign(spend=0, conv=0)[["ce", "term", "clicks", "spend", "conv", "impr"]].to_csv(dst / "ad_keywords.csv", index=False)
-    (dst / "manifest.json").write_text(json.dumps({"snapshot": name, "derived_from": [f"{SOURCE} (clusters, Google Ads, Search Console)"],
+    (dst / "manifest.json").write_text(json.dumps({"snapshot": name, "derived_from": [f"{src.name} (clusters, Google Ads, Search Console)"],
                                                     "ces": ce}, indent=1))
     print(f"snapshot {name}: " + ", ".join(f"{k} {len(v)}" for k, v in rows.items()))
     return dst

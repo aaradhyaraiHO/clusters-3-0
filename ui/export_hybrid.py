@@ -7,9 +7,11 @@ and its mapping runs from pipeline_local/; inputs Vatican alone has (Satvik's wo
 left empty for it.
 
 Paid numbers are Google Ads keyword totals spread over clusters by the searches each keyword served (the analytics
-session's capture method), so they reconcile with the account. Products and Headout entities come from the
-cluster_sources run on the hybrid set; pages from hybrid/pages_189.csv (map_hybrid_pages.py). CE-level totals still
-come from the v3_rebuilt export (vatican.json).
+session's capture method), so they reconcile with the account. Vatican's supply comes from the cluster_sources run on
+the hybrid set; every CE's Headout entities from its own entities_<CE>.csv (sql/templates/entities.sql). Pages come from
+the text mapper (hybrid/pages_189.csv, or pages_mapped_<CE>.csv) and are then re-placed here: Payload tags first, operator
+listings to the operator cluster, pages about a place no cluster covers to no cluster, and a name check on the rest.
+CE-level totals still come from the v3_rebuilt export (vatican.json).
 """
 import json
 import re
@@ -19,6 +21,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+from english import english_checker, english_page
+from spelling import lev, speller
 
 HERE = Path(__file__).resolve().parent
 ROOT = Path(sys.argv[1])
@@ -51,37 +56,77 @@ else:
     SOURCES = None
     PAGES, LANDING = OUT / f"pages_mapped_{CE}.csv", OUT / "landing_pages.csv"
 SITE = HOST.replace("www.", "")
+# The window this CE's Google Ads and order data was pulled on (pull_ce.py writes window.json); the fixed window for a
+# CE pulled before that existed.
+from window import FIXED as _FIXED, label as _window_label
+_win = json.loads((OUT / "window.json").read_text()) if CE != 189 and (OUT / "window.json").exists() else {"start": _FIXED[0], "end": _FIXED[1]}
+WINDOW_LABEL = _window_label(_win["start"], _win["end"])
 # The head-term cluster: named "... Head Term" in Vatican's and Milford's sets, named in ces.json otherwise (Park Güell's is "Park Güell").
 HEAD_NAME = None if CE == 189 else CFG.get("head")
 MIN_TERM_CLICKS = 20
 
 norm = lambda s: " ".join(str(s).lower().split())
 r = lambda v, d=0: None if v is None or pd.isna(v) else round(float(v), d) if d else int(round(float(v)))
+# A share of a total that is 0 (a new CE has no revenue, ads or organic clicks yet) is no value, not an error.
+div = lambda a, b: a / b if b else None
 
 
 def assign(run):
     a = pd.read_csv(RUNS / run / "outputs" / f"assignments_{CE}.csv", low_memory=False)
     # Jev runs carry how = jev / jev_failed and the class probability; the rules mapper writes E_how only for CEs with
     # rules in ce_config, so elsewhere the label comes from its D0.85 steps.
-    if "how" in a and a["how"].astype(str).str.startswith("jev").any():
+    # An empty run (a CE with no paid searches) has the pipeline's columns but no rows to tell the format by.
+    if "how" in a and (a.empty or a["how"].astype(str).str.startswith("jev").any()):
         a["E_how"] = np.where(a[COL].notna(), "jev", "unmapped")
     elif "E_how" not in a:
         a["E_how"] = np.select([a["A"].notna(), a["B_raw"].where(a["score"] >= 0.7).notna()], ["identifier", "polyfuzz"],
                                np.where(a[COL].notna(), "embedding", "unmapped"))
+    if MERGE and COL in a:
+        merged = a[COL].isin(set(MERGE))
+        a[COL] = a[COL].replace(MERGE)
+        if NAME in a:
+            a.loc[merged, NAME] = a.loc[merged, COL].map(names["name"])
     return a.assign(k=a["term"].map(norm))
 
 
 kw = pd.read_csv(CLUSTERS)
 kw = kw[kw["ce"] == CE].assign(k=lambda d: d["kw"].map(norm))
+# English only (english.py): keywords, search terms and Perf data. Clusters left with no English keyword drop out.
+CE_NAME = "Vatican Museums" if CE == 189 else CFG["name"]
+is_en = english_checker([CE_NAME, *kw["name"].dropna().unique()])
+# Always a bool Series: on an empty frame map() returns object dtype, and frame[object Series] selects columns, not rows.
+en_mask = lambda col: col.map(is_en).astype(bool)
+kw = kw[en_mask(kw["kw"])]
+# The clusters prompt's negative keywords (pipeline negative_keywords.json): a keyword naming a competitor sits in no
+# cluster, whichever run made the clusters. Searches that served the CE's own ads keep their cluster.
+_neg = json.loads((ROOT / "negative_keywords.json").read_text())
+_neg_re = re.compile(r"\b(" + "|".join(re.escape(t) for t in dict.fromkeys(_neg["all"] + _neg.get("by_ce", {}).get(str(CFG.get("eos_id", CE) if CE != 189 else CE), []))) + r")\b")
+kw = kw[~kw["k"].str.contains(_neg_re)]
+# Misspellings of the CE's name (spelling.py) go to the cluster holding the right spelling, and a cluster made only of
+# them merges into it; MERGE re-points the search-term placements in assign(). They never become a focus keyword.
+fix_spelling = speller(CE_NAME, dict(zip(kw["k"], kw["vol"])))
+kw["fix"] = [fix_spelling(k, v) for k, v in zip(kw["k"], kw["vol"])]
+_home = dict(zip(kw.loc[kw["fix"].isna(), "k"], kw.loc[kw["fix"].isna(), "cid"]))
+_to = kw["fix"].map(lambda f: _home.get(norm(f)) if isinstance(f, str) else None)
+_moved = _to.notna() & (_to != kw["cid"])
+_meta = kw[~_moved].drop_duplicates("cid").set_index("cid")
+MERGE = {c: g.value_counts().index[0] for c, g in _to[_moved].groupby(kw.loc[_moved, "cid"]) if c not in _meta.index}
+for col in ("name", "t", "rank", "ids"):
+    if col in kw:
+        kw[col] = kw[col].astype(object)
+        kw.loc[_moved, col] = _to[_moved].map(_meta[col]).values
+kw.loc[_moved, "cid"] = _to[_moved].values
+if _moved.any():
+    print(f"spelling: {int(_moved.sum())} misspelt keywords moved to the cluster with the right spelling; {len(MERGE)} clusters merged")
 names = kw.drop_duplicates("cid").set_index("cid")
 # Vatican carries CE totals and change log over from the v3_rebuilt export; Milford's come from its own pulls.
 if CE == 189:
     v3 = json.load(open(HERE / "vatican.json"))
 else:
     landed = pd.read_csv(OUT / f"orders_by_landing_{CE}.csv")
-    v3 = {"ce": {"id": str(CE), "name": CFG["name"], "host": HOST, "window": "30 Jul – 27 Oct 2026",
+    v3 = {"ce": {"id": str(CE), "name": CFG["name"], "host": HOST, "window": WINDOW_LABEL,
                  "revenue": round(float(landed["sum_revenue_usd"].sum()), 2), "orders": int(landed["count_orders"].sum()),
-                 "banner": "Real: clusters and keywords (11-CE hybrid run), Google Ads search terms, keywords and ad groups (30 Jul – 27 Oct), "
+                 "banner": f"Real: clusters and keywords (11-CE hybrid run), Google Ads search terms, keywords and ad groups ({WINDOW_LABEL}), "
                            "orders, paid revenue traced by click, Mixpanel funnel, Payload pages and Search Console. Not loaded for "
                            f"{CFG['name']}: Satvik's capture numbers, Headout entities. Pages map to clusters by meaning."}, "change_log": []}
 old = {c["id"]: c for c in v3.get("clusters", [])}
@@ -90,7 +135,7 @@ old_by_name = {c["name"].lower(): c for c in old.values()}
 # Trust pages (about us, legal) carry no search intent; the page mapper still matches their focus keyword to something.
 hpages = pd.read_csv(PAGES, dtype={"collection_id": str})
 hpages = hpages[hpages["page_type"] != "Trust"].assign(path=lambda d: d["path"].fillna(""))
-hpages["url"] = HOST + "/" + hpages["path"]
+hpages["url"] = (hpages["host"] if "host" in hpages else HOST) + "/" + hpages["path"]
 # Organic orders by the page they landed on. A Payload page serves every locale, so /de/sistine-chapel counts for
 # sistine-chapel; orders landing on headout.com rather than the microbrand map to no page and stay at CE level.
 landed_all = pd.read_csv(V4 / "orders_by_landing.csv" if CE == 189 else OUT / f"orders_by_landing_{CE}.csv").rename(
@@ -102,63 +147,507 @@ org_land["key"] = (org_land["landing_path"].str[len(HOST):].str.strip("/")
 org_by_page = org_land.groupby("key")[["orders", "revenue_usd"]].sum()
 hpages["org_orders"] = hpages["path"].str.strip("/").map(org_by_page["orders"]).fillna(0)
 hpages["org_revenue"] = hpages["path"].str.strip("/").map(org_by_page["revenue_usd"]).fillna(0)
+# Supply for Vatican still comes from the cluster_sources run; every CE's Headout entities come from its own pull below.
 if SOURCES:
-    hsrc = pd.read_csv(SOURCES / f"cluster_sources_{CE}.csv").set_index("cid")
     hsup = pd.read_csv(SOURCES / f"supply_{CE}.csv", dtype={"experience_id": str})
-    hent = pd.read_csv(SOURCES / f"entities_{CE}.csv", dtype={"entity_id": str})
 else:
-    hsrc = pd.DataFrame(columns=["entity_status"]).rename_axis("cid")
     hsup = pd.DataFrame(columns=["cid", "experience_id", "experience_name", "live", "revenue_usd", "orders"])
-    hent = pd.DataFrame(columns=["cid", "entity_type", "entity_id", "name", "is_active"])
 
-# Pages tagged in Payload with a place (a POI, or a collection other than the CE's own) go to a cluster about that place
-# (Parag, 30 Oct: link by metadata, not text). Candidates are clusters whose Headout entities include the tag, or whose
-# name holds the tag's distinctive words; the text mapper's pick stands if it is one of them, else the candidate that
-# shares most words with the page path. Untagged pages keep the text mapping.
-ROOT_IDS = {"poi": {"1"}, "collection": {"189", "3945"}}
-tag_names = pd.read_csv(HERE / "hybrid" / "page_entities.csv", dtype=str).set_index(["entity_type", "entity_id"])["name"]
-TAG_GENERIC = {"the", "of", "city", "vatican", "museums", "museum", "milford", "sound", "tickets", "and", "palace", "apostolic"}
-# Trailing "s" dropped so a path's "peters" meets a name's "Peter's".
-tag_words = lambda t: {w[:-1] if len(w) > 4 and w.endswith("s") else w
-                       for w in re.split(r"[^a-z0-9]+", str(t).lower().replace("'s", "")) if len(w) > 2 and w not in TAG_GENERIC}
+# ---------------------------------------------------------------------------------------------------------------------
+# Words. One tokenizer for entity links, page placement and supply: folded to ASCII, plural "s" and "-ing" dropped, and
+# a few synonyms put on one word so "heli", "flights", "fly" and "plane" meet, and "lodging" meets "accommodation".
+# ---------------------------------------------------------------------------------------------------------------------
+fold = lambda t: unicodedata.normalize("NFKD", str(t).lower()).encode("ascii", "ignore").decode()
+SYN = {**dict.fromkeys(["heli", "helicopter", "chopper"], "helicopter"),
+       **dict.fromkeys(["flight", "fly", "flyover", "flying", "plane", "aerial", "airplane"], "flight"),
+       **dict.fromkeys(["lodging", "accommodation", "accom", "stay", "hotel", "lodge", "hostel", "motel"], "lodging"),
+       **dict.fromkeys(["thing", "sight", "highlight", "attraction"], "sight"),
+       **dict.fromkeys(["pope", "papal"], "pope"),
+       **dict.fromkeys(["coach", "bus", "transfer"], "coach"),
+       **dict.fromkeys(["gett", "get", "address", "direction", "location", "transport", "drive"], "getting"),
+       **dict.fromkeys(["timing", "hour", "opening"], "hour"),
+       **dict.fromkeys(["price", "cost", "fee"], "price"),
+       **dict.fromkeys(["luxury", "premium"], "luxury"),
+       **dict.fromkeys(["rule", "regulation", "restriction"], "rule"),
+       **dict.fromkeys(["waterfall", "fall"], "fall"),
+       "judgement": "judgment", "maps": "map", "kayaking": "kayak", "visiting": "visit", "visitor": "visit"}
+STOP = {"the", "and", "for", "from", "with", "what", "when", "where", "how", "who", "why", "near", "inside", "into", "your",
+        "best", "official", "head", "term", "general", "info", "information", "guide", "vs", "its", "are", "can"}
+# Product formats: say what is sold, not which part of the CE the page or cluster is about.
+FORMAT = {"tour", "cruise", "trip", "ticket", "day", "package", "combo", "booking", "book", "entry", "experience", "option"}
+NAME_WORDS = {"vatican", "museum", "musei", "vaticani"} if CE == 189 else set(CFG.get("name_words", []))
+
+
+def word(w):
+    w = w[:-1] if len(w) > 4 and w.endswith("s") and not w.endswith("ss") else w
+    w = w[:-3] if len(w) > 6 and w.endswith("ing") and w not in SYN else w
+    return SYN.get(w, w)
+
+
+NAME_T = {word(w) for w in NAME_WORDS}
+
+
+def toks(text, drop=frozenset()):
+    """Distinctive words of a name, path or keyword: no CE name words, filler or one- and two-letter words."""
+    out = set()
+    for w in re.split(r"[^a-z0-9]+", fold(re.sub(r"'s\b", "", str(text)))):
+        if len(w) > 2 and w not in STOP:
+            w = word(w)
+            if w not in NAME_T and w not in STOP and w not in drop:
+                out.add(w)
+    return out
+
+
+# The CE's child collections and POIs (pull_ce.py: entities.sql). POIs carry no active flag in dim_pois, so they count
+# as active; an inactive collection never fills a slot (it stays in the CE's entity list for Set-up to name).
+ENTS_FILE = OUT / f"entities_{CE}.csv"
+# bq writes an empty file, not a header, when a CE has no child collections or POIs.
+ents = pd.read_csv(ENTS_FILE, dtype={"entity_id": str}) if ENTS_FILE.exists() and ENTS_FILE.stat().st_size else pd.DataFrame(
+    columns=["entity_type", "entity_id", "name", "alt_names", "is_active", "sub_category"])
+for c in ("alt_names", "sub_category", "source"):
+    if c not in ents:
+        ents[c] = None
+ents["is_active"] = ents["is_active"].map(lambda v: str(v).lower() == "true" if pd.notna(v) else True)
+ents.loc[ents["entity_type"] == "poi", "is_active"] = True
+# Words that name a product format say nothing about which cluster an entity belongs to; "scenic" is a description.
+ENT_GENERIC = FORMAT | {"scenic", "nature", "museum", "city", "of"}
+ent_words = lambda t: toks(t, ENT_GENERIC)
+# Every name an entity goes by: its own, its English-ish display names, and for a collection its sub-category (what it
+# sells: "Milford Sound: Scenic Flights" sells Helicopter Tours). Each is a separate word set.
+def ent_names(e):
+    # A POI's display names are its names in use ("Vatican Gardens"); a collection's are page titles in other languages.
+    alts = [e["name"]] + ([a for a in str(e["alt_names"] or "").split(" | ") if a and a.isascii()] if e["entity_type"] == "poi" else [])
+    if e["entity_type"] == "collection" and pd.notna(e.get("sub_category")):
+        alts.append(e["sub_category"])
+    sets = [ent_words(a) for a in alts]
+    return [s for s in sets if s]
+ents["wsets"] = [ent_names(e) for _, e in ents.iterrows()] if len(ents) else []
+ents["words"] = [ent_words(n) for n in ents["name"]] if len(ents) else []
+# For the keyword-share test the whole name counts ("scenic flight", not "flight", which "coach cruise fly" also has).
+ents["kwords"] = [toks(n, FORMAT) for n in ents["name"]] if len(ents) else []
+
+# Operator collections: a child collection named after a supplier of the CE's products ("southern-discoveries",
+# "RealNZ", "Pure milford") is the operator's own listing. Its page and its slot go to the operator cluster, never to
+# the cluster about a place or format that the operator's name happens to sit in.
+vendors_file = OUT / f"variant_availability_{CE}.csv"
+squash = lambda t: re.sub(r"[^a-z0-9]", "", fold(t))
+VENDORS = set()
+if vendors_file.exists():
+    for v in pd.read_csv(vendors_file, usecols=["vendors"])["vendors"].dropna():
+        VENDORS |= {squash(x) for x in str(v).split(",") if squash(x)}
+# A collection with a sub-category is a category listing even when a supplier shares its name ("Milford Sound: Scenic
+# Flights" lists Helicopter Tours); operator listings carry none.
+ents["operator"] = [t == "collection" and squash(n) in VENDORS and pd.isna(sc)
+                    for t, n, sc in zip(ents["entity_type"], ents["name"], ents["sub_category"])] if len(ents) else []
+OPERATOR_RE = re.compile(r"operator|compan|brand|vendor|partner|provider|supplier", re.I)
 real_cids = [c for c in names.index if not str(names.at[c, "name"]).startswith("Other")]
+HEAD_CIDS = {c for c in real_cids if "head term" in str(names.at[c, "name"]).lower() or norm(names.at[c, "name"]) == norm(HEAD_NAME or "")}
+operator_cid = next((c for c in real_cids if OPERATOR_RE.search(str(names.at[c, "name"])) and not re.search(r"brand\s*&\s*trust", str(names.at[c, "name"]), re.I)), None)
+cname_t = {c: toks(names.at[c, "name"]) for c in real_cids}
+
+
+def operator_cluster(e):
+    """The cluster that names this operator ("Realnz Milford Sound Cruise" for RealNZ), else a combined operator
+    cluster ("Cruise Operators & Companies"), else none. Ties go to the shortest name, then volume."""
+    own = [c for c in real_cids if c not in HEAD_CIDS and squash(e.name) in squash(names.at[c, "name"])]
+    if own:
+        return min(own, key=lambda c: (len(cname_t[c]), -kw.loc[kw["cid"] == c, "vol"].max()))
+    return operator_cid
+
+
+kw_toks = kw.groupby("cid")["kw"].agg(lambda s: [toks(k) for k in s.dropna()])
+
+
+def named_by(cid):
+    """Entities a cluster's name names: every word of one of the entity's names is in the cluster name."""
+    if cid in HEAD_CIDS or not len(ents):
+        return ents.iloc[0:0]
+    m = [any(ws <= cname_t[cid] for ws in e.wsets) and not e.operator for e in ents.itertuples()]
+    return ents[m]
+
+
+# An entity belongs to a cluster when the cluster's name names it; only a cluster that names no entity can take one
+# whose words are in at least a quarter of its keywords (one stray keyword must not tie a cluster to a place). So
+# "Combo: Vatican Museums + St Peter's Basilica" holds St Peter's, not the Sistine Chapel its keywords also mention.
+# Operator collections go to the operator cluster only; inactive collections go nowhere.
+links = []
+for cid in real_cids:
+    if cid in HEAD_CIDS:
+        continue
+    nb = named_by(cid)
+    for e in nb.itertuples():
+        links.append({"cid": cid, "entity_type": e.entity_type, "entity_id": e.entity_id, "name": e.name, "is_active": e.is_active, "from": "name"})
+    if len(nb) or not len(ents):
+        continue
+    ks = kw_toks.get(cid, [])
+    for e in ents.itertuples():
+        if e.operator or not e.kwords or not ks:
+            continue
+        if sum(e.kwords <= k for k in ks) / len(ks) >= 0.25:
+            links.append({"cid": cid, "entity_type": e.entity_type, "entity_id": e.entity_id, "name": e.name, "is_active": e.is_active, "from": "keywords"})
+for e in (ents[ents["operator"]].itertuples() if len(ents) else []):
+    oc = operator_cluster(e)
+    if oc is not None:
+        links.append({"cid": oc, "entity_type": e.entity_type, "entity_id": e.entity_id, "name": e.name, "is_active": e.is_active, "from": "operator"})
+hent = pd.DataFrame(links, columns=["cid", "entity_type", "entity_id", "name", "is_active", "from"])
+hent = hent[~((hent["entity_type"] == "collection") & ~hent["is_active"].astype(bool))]
+# Which products each collection's ranking lists; a collection whose products mostly do not name the CE is about another
+# place (Doubtful Sound Cruises under Milford Sound).
+_pp = pd.read_csv(OUT / f"page_products_{CE}.csv", dtype={"collection_id": str}, usecols=["collection_id", "experience_name"])
+# The CE's first name word ("milford", "vatican"): "sound" alone would count Doubtful Sound's products as Milford's.
+CE_WORD = fold(re.split(r"[^A-Za-z0-9]+", "Vatican" if CE == 189 else CFG["name"])[0])
+_names_ce = lambda n: CE_WORD in set(re.split(r"[^a-z0-9]+", fold(n)))
+coll_names_ce = _pp.groupby("collection_id")["experience_name"].agg(lambda s: s.map(_names_ce).mean())
+other_place = lambda t, i: t == "collection" and coll_names_ce.get(str(i), 1) < 0.5
+CMP_RE = re.compile(r"\b(vs|versus|compare|comparison|compared|oder)\b", re.I)
+is_cmp_cluster = lambda c: bool(CMP_RE.search(str(names.at[c, "name"])))
+names_ce = lambda c: CE_WORD in set(re.split(r"[^a-z0-9]+", fold(names.at[c, "name"])))
+is_combo = lambda c: bool(re.search(r"\+|\bcombo", str(names.at[c, "name"]), re.I))
+# A collection about another place belongs only to a cluster about that place alone, to a comparison of the two, or to an
+# explicit combo ("Combo: Vatican Museums + St Peter's Basilica"); not to "Milford and Doubtful Sound Cruise", whose name
+# also holds the CE.
+mixes_ce = lambda c: names_ce(c) and not is_cmp_cluster(c) and not is_combo(c)
+# A boolean Series, not a list: an empty list would select no columns from an empty frame (a CE with no entities).
+hent = hent[pd.Series([not (other_place(t, i) and mixes_ce(c))
+                       for t, i, c in zip(hent["entity_type"], hent["entity_id"], hent["cid"])], index=hent.index, dtype=bool)]
+print(f"entities: {len(ents)} under the CE ({int(ents['operator'].sum()) if len(ents) else 0} operators); "
+      f"{hent['cid'].nunique()} clusters linked by name or keywords")
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Pages -> clusters. Metadata first (Parag, 30 Oct: link by the page's Payload tags, not its text), then a name check on
+# the text mapper's pick. A page about a place no cluster covers goes to no cluster and says why, rather than to the
+# nearest cluster by meaning.
+# ---------------------------------------------------------------------------------------------------------------------
+ROOT_IDS = {"poi": {"1"}, "collection": {"189", "3945", str(CE)}}
+tag_names = pd.read_csv(HERE / "hybrid" / "page_entities.csv", dtype=str).set_index(["entity_type", "entity_id"])["name"]
+if len(ents):
+    tag_names = pd.concat([tag_names, ents.astype({"entity_id": str}).set_index(["entity_type", "entity_id"])["name"]])
+    tag_names = tag_names[~tag_names.index.duplicated(keep="last")]
+ent_by_key = {(e.entity_type, str(e.entity_id)): e for e in ents.itertuples()} if len(ents) else {}
 cvol = kw.groupby("cid")["vol"].max()
-
-
-def page_tag(row):
+cid_name = lambda c: names.at[c, "name"] if c in names.index else None
+def page_tags(row):
+    """The page's Payload place tags that are not the CE itself: its POI, then its collection."""
+    out = []
     poi = None if pd.isna(row.get("poi_id")) else str(row["poi_id"]).split(".")[0]
     coll = None if pd.isna(row.get("collection_id")) else str(row["collection_id"]).split(".")[0]
     if poi and poi not in ROOT_IDS["poi"]:
-        return "poi", poi
+        out.append(("poi", poi))
     if coll and coll not in ROOT_IDS["collection"]:
-        return "collection", coll
-    return None
+        out.append(("collection", coll))
+    return out
 
 
-def tag_cluster(row):
-    tag = page_tag(row)
-    if not tag:
-        return row["cid"], row.get("how"), None
+def tag_label(tag):
     name = tag_names.get(tag, "")
-    want = tag_words(name)
-    linked = set(hent.loc[(hent["entity_type"] == tag[0]) & (hent["entity_id"] == tag[1]), "cid"])
-    named = {c for c in real_cids if want and want <= tag_words(names.at[c, "name"])}
-    cands = (linked | named) & set(real_cids)
-    label = f"{'POI' if tag[0] == 'poi' else 'Collection'} {tag[1]}" + (f" · {name}" if name else "")
-    if not cands:
-        return row["cid"], row.get("how"), label
-    # Most words shared with the page path; then the cluster that is the place itself (no other words in its name);
-    # then the text mapper's pick; then the fewest extra words, then volume.
-    path = tag_words(str(row["path"]).replace("-", " ").replace("/", " "))
-    words_of = lambda c: tag_words(names.at[c, "name"])
-    best = max(cands, key=lambda c: (len(path & words_of(c)), words_of(c) == want, c == row["cid"], -len(words_of(c) - want), cvol.get(c, 0)))
-    return best, tag[0], label
+    return f"{'POI' if tag[0] == 'poi' else 'Collection'} {tag[1]}" + (f" · {name}" if name else "")
 
 
-tagged = hpages.apply(tag_cluster, axis=1, result_type="expand")
-moved = (tagged[0] != hpages["cid"]) & tagged[0].notna()
-hpages[["cid", "how", "tag"]] = tagged.values
-print(f"pages linked by POI or collection: {int(hpages['tag'].notna().sum())}; moved from the text mapping: {int(moved.sum())}")
+def tag_wsets(tag):
+    e = ent_by_key.get(tag)
+    return e.wsets if e is not None else [s for s in [ent_words(tag_names.get(tag, ""))] if s]
+
+
+def own_words(tag):
+    e = ent_by_key.get(tag)
+    return e.words if e is not None else ent_words(tag_names.get(tag, ""))
+
+
+def page_words(row):
+    focus = str(row.get("focus_keyword_en") or "").split(",")[0]
+    return toks(str(row["path"]).replace("-", " ").replace("/", " ") + " " + focus)
+
+
+# Entities with a cluster of their own (named or linked): a page about any other place has no cluster to go to.
+# An entity counts as covered when it, or an entity of the same name, has a cluster (the inactive Underwater Observatory
+# collection 5597 is covered by POI 1294's cluster). Inactive collections never mark a page as being about another place.
+covered = {(x.entity_type, str(x.entity_id)) for x in hent.itertuples()}
+_covered_words = [frozenset(ent_by_key[k].words) for k in covered if k in ent_by_key and ent_by_key[k].words]
+covered |= {(e.entity_type, str(e.entity_id)) for e in ents.itertuples() if e.words and frozenset(e.words) in _covered_words} if len(ents) else set()
+place_ents = [e for e in ents.itertuples() if e.words and not e.operator and e.is_active] if len(ents) else []
+# Comparison clusters ("Milford Sound vs Doubtful Sound") take only comparison pages, and a comparison page goes only to
+# a comparison cluster.
+is_cmp_page = lambda row: bool(CMP_RE.search(str(row["path"]).replace("-", " ").replace("/", " ") + " "
+                                             + str(row.get("focus_keyword_en") or "").split(",")[0]))
+
+
+def bigrams(text):
+    w = [x for x in re.split(r"[^a-z0-9]+", fold(re.sub(r"'s\b", "", re.sub(r"\(.*?\)", " ", str(text))))) if x]
+    return {(a, b) for a, b in zip(w, w[1:])}
+
+
+def phrase_hits(cid, row):
+    page = bigrams(str(row["path"]).replace("/", " ") + " " + str(row.get("focus_keyword_en") or "").split(",")[0])
+    return len(bigrams(names.at[cid, "name"]) & page)
+
+
+def fits(cid, pw, cmp=None):
+    """A cluster fits a page when the page names every place the cluster's name names, and shares a distinctive word
+    with the cluster's name (or the page has none beyond the CE's own name and product formats). A comparison cluster
+    fits only a comparison page, and the other way round."""
+    if cmp is not None and is_cmp_cluster(cid) != cmp:
+        return False
+    # A page about another place (it names one) never goes to a cluster that mixes it with the CE.
+    if mixes_ce(cid) and any(other_place(e.entity_type, e.entity_id) and any(ws <= pw for ws in e.wsets) for e in place_ents):
+        return False
+    if any(not any(ws <= pw for ws in e.wsets) for e in named_by(cid).itertuples()):
+        return False
+    dist = pw - FORMAT
+    return not dist or bool(dist & cname_t[cid])
+
+
+def place(row):
+    """(cluster, how, tag label, why-not) for one page."""
+    cid, how = row["cid"], row.get("how")
+    if row.get("page_type") == "Theme":
+        return cid, how, None, None
+    tags = page_tags(row)
+    label = tag_label(tags[0]) if tags else None
+    pw = page_words(row)
+    cmp = is_cmp_page(row)
+    # 1. Operator listings go to the operator cluster.
+    for t in tags:
+        e = ent_by_key.get(t)
+        if e is not None and e.operator:
+            oc = operator_cluster(e)
+            return (oc, "operator", tag_label(t), None) if oc is not None else (None, "operator", tag_label(t), "operator page; no operator cluster")
+    # 2. Tagged with a place: a cluster linked to it or named for it, the one sharing most words with the page path.
+    if tags:
+        named = {c for c in real_cids for t in tags for ws in tag_wsets(t) if ws <= cname_t[c]}
+        linked = set(hent.loc[[(x.entity_type, str(x.entity_id)) in tags for x in hent.itertuples()], "cid"]) if len(hent) else set()
+        cands = {c for c in (named | linked) & set(real_cids) if is_cmp_cluster(c) == cmp}
+        coll = next((t[1] for t in tags if t[0] == "collection"), None)
+        away = bool(coll) and other_place("collection", coll)
+        if away:
+            # A collection about another place (Doubtful Sound under Milford) goes only to a cluster about that place
+            # alone: not one whose name also holds the CE ("Milford and Doubtful Sound Cruise").
+            cands = {c for c in cands if not mixes_ce(c)}
+        if cands:
+            # Most words shared with the page; then the cluster that is the place itself (its name, formats aside, is
+            # one of the place's names: "St Peter's Basilica" over "Combo: ... + St Peter's Basilica"); then the text
+            # mapper's pick; then the fewest extra words; then volume.
+            wsets = [ws for t in tags for ws in tag_wsets(t)]
+            want = set().union(*wsets) if wsets else set()
+            best = max(cands, key=lambda c: (len(pw & cname_t[c]), cname_t[c] in wsets, c == cid,
+                                             -len(cname_t[c] - FORMAT - want), cvol.get(c, 0)))
+            return best, tags[0][0], label, None
+        if any(own_words(t) for t in tags):
+            if away:
+                return None, "tag", label, f"about another place ({tag_names.get(('collection', coll), coll)}); no cluster for it"
+            # The text pick stands only when its own keywords mention the tagged place by its own name (a translated
+            # name like "Vatikan" would tie the Grottoes to any German ticket search).
+            words = set().union(*[own_words(t) for t in tags])
+            if pd.notna(cid) and any(words & k for k in kw_toks.get(cid, [])):
+                return cid, "text+tag", label, None
+            return None, "tag", label, f"no cluster about {tag_names.get(tags[0], tags[0][1])}"
+    # 3. A page that names a place with no cluster of its own (another place the CE sells, like the Colosseum).
+    for e in place_ents:
+        if (e.entity_type, str(e.entity_id)) not in covered and any(ws <= pw for ws in e.wsets) \
+                and not any(ws <= cname_t[c] for c in real_cids for ws in e.wsets):
+            return None, "place", label, f"about {e.name}; no cluster for it"
+    # 3b. A page that names a place with a cluster of its own goes there when the text pick is missing or does not fit:
+    # /underwater-observatory names POI 1294, which "Milford Sound Underwater" holds.
+    if pd.isna(cid) or (cid in cname_t and not fits(cid, pw, cmp)):
+        hits = {}
+        for e in place_ents:
+            if any(ws <= pw for ws in e.wsets):
+                for c in hent.loc[(hent["entity_type"] == e.entity_type) & (hent["entity_id"].astype(str) == str(e.entity_id)), "cid"]:
+                    if c in cname_t and c not in HEAD_CIDS and is_cmp_cluster(c) == cmp \
+                            and not (other_place(e.entity_type, e.entity_id) and mixes_ce(c)):
+                        hits[c] = max(hits.get(c, 0), len(pw & cname_t[c]))
+        if hits:
+            return max(hits, key=lambda c: (hits[c], cvol.get(c, 0))), "entity", label, None
+    # 4. Name check on the text mapper's pick; else the cluster whose name shares most of the page's words. A page the
+    # text mapper left out gets the same name search (/kayaking -> "Milford Sound Kayak Tour").
+    dist = pw - FORMAT
+    if pd.isna(cid):
+        scored = [(len(dist & cname_t[c]), c) for c in real_cids if c not in HEAD_CIDS and fits(c, pw, cmp)] if dist else []
+        scored = [(sc, c) for sc, c in scored if sc and sc * 2 >= len(dist)]
+        if scored:
+            top = max(sc for sc, _ in scored)
+            return max((c for sc, c in scored if sc == top), key=lambda c: (phrase_hits(c, row), cvol.get(c, 0))), "name", label, None
+        return cid, how, label, None
+    if not dist and pw:
+        # A page that names only the CE and a format ("tours"): the cluster for that format in general, the one whose
+        # name holds the format and nothing more specific, over "Queenstown to ... Tours" the text matched.
+        plain = [c for c in real_cids if c not in HEAD_CIDS and pw & cname_t[c] and not (cname_t[c] - FORMAT)]
+        if plain and cid not in plain:
+            return max(plain, key=lambda c: cvol.get(c, 0)), "name", label, None
+    if cid not in cname_t or fits(cid, pw, cmp):
+        return cid, how, label, None
+    scored = [(len(dist & cname_t[c]), c) for c in real_cids if c not in HEAD_CIDS and fits(c, pw, cmp)]
+    scored = [(s, c) for s, c in scored if s and s * 2 >= len(dist)]
+    if scored:
+        top = max(s for s, _ in scored)
+        # Ties go to the cluster whose name appears in the page as a phrase ("vatican-city" is "Vatican City (the
+        # state)", not "Passes & City Passes"), then to volume.
+        best = max((c for s, c in scored if s == top), key=lambda c: (phrase_hits(c, row), cvol.get(c, 0)))
+        return best, "name", label, None
+    return None, how, label, f"no cluster named for it (text match was {cid_name(cid)})"
+
+
+placed = hpages.apply(place, axis=1, result_type="expand")
+before = hpages["cid"].copy()
+# apply() on a CE with no pages returns no columns to unpack.
+hpages[["cid", "how", "tag", "why_no_cluster"]] = placed.values if len(hpages) else np.empty((0, 4), dtype=object)
+hpages["text_cid"] = before
+moved = (hpages["cid"].fillna("") != before.fillna(""))
+print(f"pages: {int(hpages['tag'].notna().sum())} tagged; {int(moved.sum())} moved from the text mapping "
+      f"({int((moved & hpages['cid'].isna()).sum())} to no cluster)")
+# The prompts doc's page prompts (page_decisions.py, run after the first export): page_mapping's match links a page no
+# rule above placed to its cluster; the own-page and page-type answers go to the tool as its suggestions.
+PAGE_AI = json.loads((OUT / "page_decisions.json").read_text())["clusters"] if (OUT / "page_decisions.json").exists() else {}
+_page_key = lambda u: re.sub(r"^https?://", "", str(u)).strip("/")
+_by_url = {_page_key(u): i for i, u in zip(hpages.index, hpages["url"])}
+_linked = 0
+for _cid, _d in PAGE_AI.items():
+    _i = _by_url.get(_page_key(_d.get("existing_page_url") or ""))
+    if _d.get("mapping") == "existing_page" and _i is not None and pd.isna(hpages.at[_i, "cid"]) and _cid in names.index:
+        hpages.at[_i, "cid"], hpages.at[_i, "how"] = _cid, "page_mapping prompt"
+        _linked += 1
+if PAGE_AI:
+    print(f"page prompts: {_linked} pages linked by page_mapping; answers for {len(PAGE_AI)} clusters")
+
+# A cluster's entity items: the tags on its own pages first (the slot's first source), then what its name or keywords
+# name. Each item says where it came from.
+page_items = []
+for x in hpages.dropna(subset=["cid"]).itertuples():
+    for t in page_tags(x._asdict()):
+        e = ent_by_key.get(t)
+        page_items.append({"cid": x.cid, "entity_type": t[0], "entity_id": t[1], "name": tag_names.get(t, e.name if e is not None else None),
+                           "is_active": True if e is None else bool(e.is_active), "from": "page"})
+# Name links to an entity that already serves another cluster's live page come after those that do not: the Scenic
+# Flight cluster's page lists 5177, so Helicopter Tours offers 7167 first.
+on_pages = {(x["entity_type"], x["entity_id"]): x["cid"] for x in page_items}
+hent["rank"] = [int(on_pages.get((t, i), c) != c) for t, i, c in zip(hent["entity_type"], hent["entity_id"], hent["cid"])]
+hent = hent.sort_values(["cid", "rank"], kind="stable").drop(columns="rank")
+hent = pd.concat([pd.DataFrame(page_items, columns=hent.columns), hent]).drop_duplicates(["cid", "entity_type", "entity_id"])
+col = hent[(hent["entity_type"] == "collection") & hent["is_active"].astype(bool)].groupby("cid").size()
+poi = hent[hent["entity_type"] == "poi"].groupby("cid").size()
+hsrc = pd.DataFrame({"entity_status": ["Child collection" if c in col.index else "POI only" for c in sorted(set(col.index) | set(poi.index))]},
+                    index=pd.Index(sorted(set(col.index) | set(poi.index)), name="cid"))
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Supply: the CE's experiences matched to each cluster (the Supply column's "n of n matched selling").
+#   Experiences: experiences_<CE>.csv (sql/templates/experiences.sql: what the CE owns or its collections list; live =
+#   available and not hidden, as cluster_sources.py). Without that pull, the products the CE's pages list stand in, live
+#   when an active variant is on sale.
+#   A cluster takes, in order: (a) the products its own pages put there on purpose, i.e. a page's pins, or the ranking
+#   of a page whose collection is not the CE's own (an operator's or a sub-collection's listing); (b) for a cluster
+#   named after an operator (a supplier of the CE's products or an operator collection), that operator's experiences;
+#   (c) experiences whose name or variant names hold every word of one part of the cluster's name ("kayak", "glow worm",
+#   "overnight"), with the same synonyms and formats set aside as everywhere else. A name with no word beyond the CE
+#   and a format matches nothing here (the template's searched products handle it).
+# ---------------------------------------------------------------------------------------------------------------------
+SP_DROP = FORMAT | {"cheap", "online", "site", "website", "price", "value", "deal", "discount", "near", "top", "list", "new", "way"}
+sp_alts = lambda t: [toks(part, SP_DROP) for part in re.split(r"[/&,()]", str(t or ""))]
+_vav = pd.read_csv(OUT / f"variant_availability_{CE}.csv", dtype={"experience_id": str, "variant_id": str})
+_vord = pd.read_csv(OUT / f"variant_orders_{CE}.csv", dtype={"experience_id": str})
+_ppx = pd.read_csv(OUT / f"page_products_{CE}.csv", dtype={"collection_id": str, "experience_id": str})
+EXP_FILE = OUT / f"experiences_{CE}.csv"
+if EXP_FILE.exists() and EXP_FILE.stat().st_size:
+    xp = pd.read_csv(EXP_FILE, dtype={"experience_id": str, "listed_in": str})
+    xp = xp[~xp["experience_name"].str.contains(r"\[DUMMY|Test ILF", regex=True, na=False)].copy()
+    xp["live"] = xp["live"].astype(str).str.lower().eq("true")
+    SUPPLY_FROM = EXP_FILE.name
+else:
+    _sale = _vav[(_vav["variant_status"] == "Active") & _vav["is_available"].astype(str).str.lower().eq("true")]
+    _o = _vord.groupby("experience_id")[["count_orders", "sum_revenue_usd"]].sum()
+    xp = _ppx.drop_duplicates("experience_id")[["experience_id", "experience_name"]].copy()
+    xp["live"] = xp["experience_id"].isin(set(_sale["experience_id"]))
+    xp["orders"] = xp["experience_id"].map(_o["count_orders"]).fillna(0).astype(int)
+    xp["revenue_usd"] = xp["experience_id"].map(_o["sum_revenue_usd"]).fillna(0)
+    xp["vendors"] = None
+    SUPPLY_FROM = "page_products (experiences pull missing)"
+_vend = _vav.groupby("experience_id")["vendors"].agg(lambda s: ", ".join(s.dropna()))
+xp["vendors"] = [v if isinstance(v, str) and v else _vend.get(e, "") for e, v in zip(xp["experience_id"], xp["vendors"])]
+_vnames = _vav.groupby("experience_id")["variant_name"].agg(lambda s: " | ".join(s.dropna().astype(str)))
+xp["w"] = [toks(n) for n in xp["experience_name"]]
+xp["wv"] = [toks(str(n) + " " + _vnames.get(e, "")) for e, n in zip(xp["experience_id"], xp["experience_name"])]
+xp["sq"] = [squash(str(n) + " " + _vnames.get(e, "")) for e, n in zip(xp["experience_id"], xp["experience_name"])]
+xp_by_id = xp.drop_duplicates("experience_id").set_index("experience_id")
+
+# (a) Products a page puts there on purpose.
+_blocks = pd.read_csv(HERE / "hybrid" / "page_product_blocks.csv", dtype=str)
+_blocks = _blocks[_blocks["uid"].str.startswith(HOST)]
+_pins = {u: [str(i) for i in json.loads(v)] for u, v in zip(_blocks["uid"], _blocks["common_ranks"]) if isinstance(v, str) and v.startswith("[")}
+
+
+def page_listed(row):
+    key = str(row["path"] or "").strip("/")
+    out = list(_pins.get(HOST + ("." + key.replace("/", ".") if key else ""), []))
+    coll = None if pd.isna(row.get("collection_id")) else str(row["collection_id"]).split(".")[0]
+    if coll and coll not in ROOT_IDS["collection"]:
+        out += list(_ppx.loc[_ppx["collection_id"] == coll].sort_values("computed_rank")["experience_id"])
+    return out
+
+
+# (b) Operators: suppliers of the CE's products and the CE's operator collections, by the words of their name once
+# legal and trade words are set aside ("Cheeky Kiwi Travel Limited" -> cheeky kiwi).
+LEGAL = {"limited", "ltd", "pty", "inc", "llc", "travel", "group", "company", "nz", "iii", "ii"}
+_ops = {}
+for v in set(", ".join(xp["vendors"].fillna("")).split(", ")) - {""}:
+    _ops.setdefault(squash(v), {"name": v, "w": toks(v, LEGAL), "vendors": set(), "colls": set()})["vendors"].add(v)
+for e in (ents[ents["operator"]].itertuples() if len(ents) else []):
+    _ops.setdefault(squash(e.name), {"name": e.name, "w": toks(e.name, LEGAL), "vendors": set(), "colls": set()})["colls"].add(str(e.entity_id))
+
+
+def cluster_operator(cid):
+    """The operator a cluster is named after: its squashed name holds the operator's, or the operator's words are all in
+    its name. "Mitre Peak" is not "Mitre Peak Cruises"; "Mitre Peak Cruises Milford Sound" is."""
+    n, nt = squash(names.at[cid, "name"]), toks(names.at[cid, "name"])
+    hits = [o for k, o in _ops.items() if (len(k) > 4 and k in n) or (o["w"] and len(o["w"]) > 1 and o["w"] <= nt)]
+    return max(hits, key=lambda o: len(squash(o["name"])), default=None)
+
+
+def operator_experiences(o):
+    ids = set(xp.loc[[bool(o["vendors"] & set(str(v).split(", "))) for v in xp["vendors"]], "experience_id"])
+    ids |= set(_ppx.loc[_ppx["collection_id"].isin(o["colls"]), "experience_id"])
+    ow = toks(o["name"], LEGAL)
+    if ow:
+        ids |= set(xp.loc[[ow <= w for w in xp["w"]], "experience_id"])
+    return ids
+
+
+sup_rows = []
+_page_rows = hpages.dropna(subset=["cid"])
+for cid in real_cids:
+    found = {}
+    if cid not in HEAD_CIDS:
+        for _, prow in _page_rows[_page_rows["cid"] == cid].iterrows():
+            if prow.get("page_type") == "Theme":
+                continue
+            for e in page_listed(prow):
+                found.setdefault(e, "page")
+    op = cluster_operator(cid)
+    if op:
+        for e in operator_experiences(op):
+            found.setdefault(e, "operator")
+    if cid not in HEAD_CIDS:
+        alts = [a for a in sp_alts(names.at[cid, "name"]) if a]
+        alts = [a - (op["w"] if op else set()) for a in alts]
+        for a in [a for a in alts if a]:
+            # Words also count inside a run-together name ("Glowworm" holds glow and worm).
+            for e in xp.loc[[a <= w or all(len(t) > 3 and t in sq for t in a) for w, sq in zip(xp["wv"], xp["sq"])], "experience_id"]:
+                found.setdefault(e, "name")
+    for e, how_found in found.items():
+        if e in xp_by_id.index:
+            x = xp_by_id.loc[e]
+            sup_rows.append({"cid": cid, "experience_id": e, "experience_name": x["experience_name"], "live": bool(x["live"]),
+                             "revenue_usd": float(x["revenue_usd"] or 0), "orders": int(x["orders"] or 0), "how": how_found})
+new_sup = pd.DataFrame(sup_rows, columns=["cid", "experience_id", "experience_name", "live", "revenue_usd", "orders", "how"])
+# Vatican keeps the 28 Oct cluster_sources supply where it found any and takes the new match only where it found none;
+# every other CE uses the new match.
+if CE == 189 and len(hsup):
+    _old_live = hsup.groupby("cid")["live"].apply(lambda v: v.astype(str).str.lower().eq("true").sum())
+    keep_new = new_sup[~new_sup["cid"].isin(set(_old_live[_old_live > 0].index))]
+    hsup = pd.concat([hsup.assign(how="cluster_sources"), keep_new], ignore_index=True)
+else:
+    hsup = new_sup
+hsup["live"] = hsup["live"].astype(str).str.lower().eq("true")
+print(f"supply: {SUPPLY_FROM}; {hsup['cid'].nunique()} clusters matched, {hsup.loc[hsup['live'], 'cid'].nunique()} with one live "
+      f"({', '.join(f'{k} {v}' for k, v in hsup.drop_duplicates(['cid', 'experience_id'])['how'].value_counts().items())})")
 
 
 def sources(cid):
@@ -167,7 +656,7 @@ def sources(cid):
     sx = hsup[hsup["cid"] == cid].sort_values(["live", "revenue_usd"], ascending=False)
     sr = hsrc.loc[cid] if cid in hsrc.index else pd.Series(dtype=object)
     return {
-        "page_revenue": r(pg["revenue"].sum(), 2), "pct_ce_revenue": r(pg["revenue"].sum() / v3["ce"]["revenue"], 4),
+        "page_revenue": r(pg["revenue"].sum(), 2), "pct_ce_revenue": r(div(pg["revenue"].sum(), v3["ce"]["revenue"]), 4),
         "organic_orders": r(pg["org_orders"].sum()), "organic_revenue": r(pg["org_revenue"].sum(), 2),
         "pages": [{"path": x.url, "type": x.page_sub_type, "collection": None if pd.isna(x.collection_id) else str(x.collection_id).split(".")[0],
                    "noindex": bool(x.any_noindex), "revenue": r(x.revenue, 2), "orders": r(x.orders),
@@ -178,8 +667,9 @@ def sources(cid):
                    "experiences": [{"name": x.experience_name, "live": bool(x.live), "revenue": r(x.revenue_usd, 2), "orders": int(x.orders)}
                                    for x in sx.itertuples()]},
         "entity": {"status": sr.get("entity_status", "CE collection") if pd.notna(sr.get("entity_status")) else "CE collection",
-                   "items": [{"type": x.entity_type, "id": x.entity_id, "name": x.name, "active": str(x.is_active) == "True"}
-                             for x in hent[hent["cid"] == cid].itertuples()]},
+                   "items": [{"type": x.entity_type, "id": str(x.entity_id), "name": None if pd.isna(x.name) else x.name,
+                              "active": bool(x.is_active), "from": x[5]}
+                             for x in hent[hent["cid"] == cid].itertuples(index=False)]},
     }
 
 pair_cid = assign(PAIR_RUN).drop_duplicates("k").set_index("k")
@@ -194,16 +684,103 @@ if "conv" not in totals:
     vconv = pd.read_csv(ROOT / "snapshots" / "20261030_validation_v1" / "keyword_totals.csv", dtype={"ce": str})
     totals = totals.merge(vconv.loc[vconv["ce"] == str(CE), ["kw_key", "conv"]], on="kw_key", how="left")
 kw_text_cid = assign(KEYWORD_RUN).drop_duplicates("k").set_index("k")[COL]
+# The CE's searches bought by other campaigns (ces.json other_terms; Grand Canyon's by Las Vegas helicopter campaigns):
+# their visible English searches join the cluster each search is placed in. Only what the search terms report shows,
+# since those campaigns' keyword totals also cover searches about other things.
+_oth_file = OUT / f"other_campaign_terms_{CE}.csv"
+oth = pd.read_csv(_oth_file) if _oth_file.exists() and _oth_file.stat().st_size else pd.DataFrame(columns=["campaign_name", "term", "impr", "clicks", "spend", "conv", "conv_value"])
+oth = oth[en_mask(oth["term"])].assign(k=lambda d: d["term"].map(norm))
+oth["cid"] = oth["k"].map(pair_cid[COL]).fillna(oth["k"].map(kw_text_cid))
+OTH_METRICS = ["impr", "clicks", "spend", "conv", "conv_value"]
+oth_cid = oth.dropna(subset=["cid"]).groupby("cid")[OTH_METRICS].sum()
+oth_camp = oth.dropna(subset=["cid"]).groupby(["cid", "campaign_name"])["clicks"].sum()
 ads = pd.read_csv(SNAP / "ad_groups.csv").assign(ag=lambda d: d["ad_group_id"].astype(str)).drop_duplicates("ag").set_index("ag")
+# Search terms first: a keyword's totals cover every search it served in any language, so each keeps its English part,
+# in proportion to its visible searches (searches Google does not report are taken to follow the same mix). A keyword
+# with no visible search counts in full if its own text is English. Its English searches then split it over clusters.
+METRICS = ["impr", "clicks", "spend", "conv_value"]
+pairs["en"] = pairs["term"].map(is_en).astype(bool)
+vis = pairs.groupby("kw_key")[METRICS].sum()
+en_frac = (pairs[pairs["en"]].groupby("kw_key")[METRICS].sum().reindex(vis.index, fill_value=0) / vis.replace(0, np.nan))
+en_frac = en_frac.apply(lambda col: col.fillna(en_frac["clicks"]).fillna(en_frac["impr"]))
+kw_en = totals.set_index("kw_key")["keyword"].map(lambda t: 1.0 if is_en(t) else 0.0)
+totals_all = totals[["kw_key", "keyword", *METRICS]].copy()
+for c, m in [("impr", "impr"), ("eligible", "impr"), ("lost_rank", "impr"), ("impr_with_share", "impr"),
+             ("clicks", "clicks"), ("spend", "spend"), ("conv_value", "conv_value"), ("conv", "conv_value")]:
+    if c in totals:
+        totals[c] = totals[c].fillna(0) * totals["kw_key"].map(en_frac[m]).fillna(totals["kw_key"].map(kw_en)).fillna(1.0).values
+ag_en = pairs.assign(**{c: pairs[c] * pairs["en"] for c in ["conv_value"]}).groupby("ag")["conv_value"].sum() / pairs.groupby("ag")["conv_value"].sum().replace(0, np.nan)
+EN_SHARE_VALUE = pairs.loc[pairs["en"], "conv_value"].sum() / pairs["conv_value"].sum() if pairs["conv_value"].sum() else 1.0
+pairs = pairs[pairs["en"]].drop(columns="en")
 
 # Own ad group, Parag's method: find the live ad groups that bid on the cluster's focus keyword (or a close variant that
 # shares its Keyword Planner volume), take the one with the most clicks as the core, then check how much of the
 # cluster's keyword volume that ad group also bids on.
-live_ags = set(ads.index[(ads["ad_group_status"] == "ENABLED") & (ads["campaign_status"] == "ENABLED")])
-bids = pd.read_csv(OUT / f"quality_score_{CE}.csv", dtype={"ad_group_id": str})
-bids = bids[bids["ad_group_id"].isin(live_ags)].assign(k=lambda d: d["keyword"].map(norm))
+# Google matches a keyword to its close variants (the same words in another order, singular or plural, small
+# function words), and Keyword Planner reports them as one keyword "in account". vkey() is that comparison.
+VK_STOP = {"a", "an", "the", "to", "in", "of", "for", "from", "at", "on", "and", "with", "by"}
+singular = lambda w: w[:-3] + "y" if len(w) > 4 and w.endswith("ies") else w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w
+vkey = lambda s: " ".join(sorted({singular(w) for w in re.findall(r"[a-z0-9]+", str(s).lower()) if w not in VK_STOP}))
+KS_FILE = OUT / f"keyword_status_{CE}.csv"
+if KS_FILE.exists():
+    # The latest daily snapshot of every keyword in the CE's campaigns: live only when keyword, ad group and campaign
+    # are all enabled; paused when it exists but one of them is paused (removed ones are not in the account).
+    kstat = pd.read_csv(KS_FILE, dtype={"ad_group_id": str}).assign(k=lambda d: d["keyword"].map(norm))
+    on = lambda s: s.eq("ENABLED")
+    # Close-variant evidence counts a live keyword in any language: an English search Google served through the Dutch
+    # keyword is covered. The keywords the tool lists are English only.
+    live_any = set(kstat.loc[on(kstat["keyword_status"]) & on(kstat["ad_group_status"]) & on(kstat["campaign_status"]), "k"])
+    kstat = kstat[en_mask(kstat["keyword"])]
+    is_live = on(kstat["keyword_status"]) & on(kstat["ad_group_status"]) & on(kstat["campaign_status"])
+    bids = kstat[is_live]
+    held = kstat[~is_live & kstat["ad_group_status"].ne("REMOVED") & kstat["campaign_status"].ne("REMOVED")]
+    KW_SNAPSHOT = str(kstat["snapshot_date"].iloc[0]) if len(kstat) else None
+    live_ags = set(bids["ad_group_id"])
+    ag_meta = pd.concat([kstat.drop_duplicates("ad_group_id").set_index("ad_group_id")[["ad_group_name", "campaign_name"]],
+                         ads[["ad_group_name", "campaign_name"]]])
+    ag_meta = ag_meta[~ag_meta.index.duplicated()]
+else:
+    live_ags = set(ads.index[(ads["ad_group_status"] == "ENABLED") & (ads["campaign_status"] == "ENABLED")])
+    bids = pd.read_csv(OUT / f"quality_score_{CE}.csv", dtype={"ad_group_id": str})
+    bids = bids[bids["ad_group_id"].isin(live_ags) & en_mask(bids["keyword"])].assign(k=lambda d: d["keyword"].map(norm))
+    held, KW_SNAPSHOT = bids.iloc[0:0], None
+    live_any = set(bids["k"])
+    ag_meta = ads[["ad_group_name", "campaign_name"]]
 ag_bids = bids.groupby("ad_group_id")["k"].agg(set)
 kw_ags = bids.groupby("k")["ad_group_id"].agg(set)
+live_by_v = bids.assign(v=bids["k"].map(vkey)).groupby("v")["k"].agg(lambda s: sorted(set(s)))
+v_ags = bids.assign(v=bids["k"].map(vkey)).groupby("v")["ad_group_id"].agg(set)
+ag_bids_v = bids.assign(v=bids["k"].map(vkey)).groupby("ad_group_id")["v"].agg(set)
+held_keys, held_v = set(held["k"]), set(held["k"].map(vkey))
+# Google's own evidence of close variants: a cluster keyword seen as a search in the last 30 days, served by a live
+# keyword under a close-variant match type (misspellings and same-meaning words, which vkey() cannot see).
+STR_FILE = OUT / f"search_terms_recent_{CE}.csv"
+served_as = {}
+if STR_FILE.exists():
+    srv = pd.read_csv(STR_FILE)
+    srv = srv[srv["match_type"].isin(["NEAR_EXACT", "NEAR_PHRASE"]) & srv["served_by"].notna()]
+    srv = srv.assign(term=srv["term"].map(norm), served_by=srv["served_by"].map(norm))
+    srv = srv[en_mask(srv["term"])]
+    srv = srv[srv["served_by"].isin(live_any) & (srv["term"] != srv["served_by"])].sort_values("impr", ascending=False)
+    served_as = srv.drop_duplicates("term").set_index("term")["served_by"].to_dict()
+
+
+def bid_state(k):
+    """bid (this exact keyword is live), variant (a close variant is live), paused (in the account, not live), none."""
+    if k in kw_ags.index:
+        return "bid", None
+    live_as = live_by_v.get(vkey(k))
+    if live_as:
+        return "variant", live_as[0]
+    if k in served_as:
+        return "variant", served_as[k]
+    if k in held_keys or vkey(k) in held_v:
+        return "paused", None
+    return "none", None
+
+
+# A keyword family: Planner's same-volume family from 1,000 searches, otherwise the keyword with its close variants.
+fam_of = lambda v, k: f"v{v:.0f}" if pd.notna(v) and v >= 1000 else f"w{vkey(k)}"
 ag_clicks = totals.groupby("ag")["clicks"].sum()
 
 
@@ -212,21 +789,21 @@ def own_ad_group(cluster_kw, focus):
     (only the focus keyword), or missing (no live ad group bids on the focus keyword)."""
     if focus is None or not len(cluster_kw):
         return {"state": "missing"}
-    fam = cluster_kw.assign(f=[f"v{v:.0f}" if v >= 1000 else f"k{key}" for v, key in zip(cluster_kw["vol"].fillna(0), cluster_kw["k"])])
+    fam = cluster_kw.assign(f=[fam_of(v, key) for v, key in zip(cluster_kw["vol"].fillna(0), cluster_kw["k"])])
     focus_fam = fam.loc[fam["k"] == norm(focus), "f"]
     focus_keys = set(fam.loc[fam["f"].isin(focus_fam), "k"]) | {norm(focus)}
-    holders = set().union(*[kw_ags.get(key, set()) for key in focus_keys])
+    holders = set().union(*[kw_ags.get(key, set()) | v_ags.get(vkey(key), set()) for key in focus_keys])
     families = fam.groupby("f").agg(vol=("vol", "first"), keys=("k", lambda ks: set(ks)))
     families["vol"] = families["vol"].fillna(0).clip(lower=1)
     if not holders:
-        bid = families["keys"].map(lambda ks: any(key in kw_ags.index for key in ks))
+        bid = families["keys"].map(lambda ks: any(bid_state(key)[0] in ("bid", "variant") for key in ks))
         return {"state": "missing", "focus": focus, "held": int(bid.sum()), "of": int(len(families))}
     core = max(holders, key=lambda a: (ag_clicks.get(a, 0), len(ag_bids.get(a, ()))))
-    in_core = ag_bids.get(core, set())
-    held = families["keys"].map(lambda ks: bool(ks & in_core))
+    in_core = ag_bids_v.get(core, set())
+    held = families["keys"].map(lambda ks: any(vkey(key) in in_core for key in ks))
     share = families.loc[held, "vol"].sum() / families["vol"].sum()
     return {"state": "full" if share >= 0.5 else "focus", "focus": focus, "share": r(share, 3),
-            "ag": ads.at[core, "ad_group_name"], "campaign": ads.at[core, "campaign_name"], "clicks": r(ag_clicks.get(core, 0)),
+            "ag": ag_meta.at[core, "ad_group_name"], "campaign": ag_meta.at[core, "campaign_name"], "clicks": r(ag_clicks.get(core, 0)),
             "held": int(held.sum()), "of": int(len(families)), "groups": len(holders)}
 
 pairs = pairs.join(ads[["ad_group_name", "campaign_name"]], on="ag")
@@ -251,7 +828,8 @@ for c, wc in [("impr", "w_impr"), ("eligible", "w_impr"), ("lost_rank", "w_impr"
 
 # AI Max is flagged per search term x ad group in the search-term report; a pair inherits that flag.
 stba = pd.read_csv(SNAP / "search_terms_by_adgroup.csv")
-stba = stba[stba["ce"] == CE].assign(k=lambda d: d["term"].map(norm), ag=lambda d: d["ad_group_id"].astype(str))
+stba = stba[(stba["ce"] == CE) & en_mask(stba["term"])]
+stba = stba.assign(k=lambda d: d["term"].map(norm), ag=lambda d: d["ad_group_id"].astype(str))
 ai_share = (stba.assign(ai=stba["match_type"].eq("AI_MAX") * stba["clicks"]).groupby(["k", "ag"])[["ai", "clicks"]].sum())
 ai_share = (ai_share["ai"] / ai_share["clicks"]).fillna(0)
 pairs["ai"] = [ai_share.get((k, g), 0) for k, g in zip(pairs["k"], pairs["ag"])]
@@ -260,25 +838,33 @@ pairs["ai"] = [ai_share.get((k, g), 0) for k, g in zip(pairs["k"], pairs["ag"])]
 # clusters by that keyword's click weights; orders with an ad group but no keyword follow the ad group's cluster mix.
 po = pd.read_csv(V4 / "paid_orders_by_click.csv" if CE == 189 else OUT / f"paid_orders_by_click_{CE}.csv")
 po = po[po["ce"] == CE]
-# The traced share is of all paid revenue, so orders with no gclid or no matching click count against it.
-paid_total = po["revenue_usd"].sum()
+# The traced share is of the English part of paid revenue, so orders with no gclid or no matching click count against
+# it. Orders link to a keyword, not a search, so their English part is the English share of Google's conversion value
+# (per keyword or ad group below, CE-wide here).
+paid_total = po["revenue_usd"].sum() * EN_SHARE_VALUE
+# Only orders whose click came from the CE's own search campaigns can trace to a cluster; Performance Max, other CEs'
+# campaigns and orders with no click id cannot, so they are the "own search" share, not a tracing gap.
+own_search = po["match_status"].eq("matched") & po["campaign_name"].fillna("").str.contains(rf"cid{CFG.get('eos_id', CE) if CE != 189 else CE}\b", regex=True)
+own_search_total = po.loc[own_search, "revenue_usd"].sum() * EN_SHARE_VALUE
 po = po[po["match_status"] == "matched"].assign(ag=lambda d: d["ad_group_id"].astype(str).str.replace(r"\.0$", "", regex=True),
                                                                     k=lambda d: d["keyword_text"].map(norm))
 key_of = totals.drop_duplicates(["ag", "k"]).set_index(["ag", "k"])["kw_key"]
-po["kw_key"] = [key_of.get((g, k)) for g, k in zip(po["ag"], po["k"])]
+po["kw_key"] = pd.Series([key_of.get((g, k)) for g, k in zip(po["ag"], po["k"])], index=po.index, dtype=object)
 rev_kw = po.dropna(subset=["kw_key"]).merge(w[["kw_key", "cid", "w_clicks"]], on="kw_key")
-rev_kw["rev"] = rev_kw["revenue_usd"] * rev_kw["w_clicks"]
+rev_kw["rev"] = rev_kw["revenue_usd"] * rev_kw["w_clicks"] * rev_kw["kw_key"].map(en_frac["conv_value"]).fillna(1.0)
 ag_mix = pairs.dropna(subset=["cid"]).groupby(["ag", "cid"])["clicks"].sum()
 ag_mix = (ag_mix / ag_mix.groupby(level=0).transform("sum")).rename("share").reset_index()
 rev_ag = po[po["kw_key"].isna()].merge(ag_mix, on="ag")
-rev_ag["rev"] = rev_ag["revenue_usd"] * rev_ag["share"]
+rev_ag["rev"] = rev_ag["revenue_usd"] * rev_ag["share"] * rev_ag["ag"].map(ag_en).fillna(1.0)
 paid_rev = pd.concat([rev_kw[["cid", "rev"]], rev_ag[["cid", "rev"]]]).groupby("cid")["rev"].sum()
-traced_share = paid_rev.sum() / paid_total if paid_total else None
+traced_share = min(paid_rev.sum() / own_search_total, 1.0) if own_search_total else None
+own_search_share = own_search_total / paid_total if paid_total else None
 
 # Satvik's capture workbook covers Vatican only.
 cap = pd.read_csv(WB / "capture.csv").set_index("Cluster") if CE == 189 else pd.DataFrame().rename_axis("Cluster")
 cov = pd.read_csv(WB / "cluster_adgroups.csv").set_index("Cluster") if CE == 189 else pd.DataFrame().rename_axis("Cluster")
 org = assign(ORGANIC_RUN)
+org = org[en_mask(org["term"]) & org["top_page"].map(english_page).astype(bool)]
 org_cid = org.dropna(subset=[COL])
 
 lp = pd.read_csv(LANDING)
@@ -323,18 +909,101 @@ ag_total_clicks = pairs.groupby("ag")["clicks"].sum()
 targeted_all = set(match_types.index)
 clusters, drawer = [], {}
 
+# The focus keyword shares a word with the cluster's name, the CE's own name aside: the same test as the tool's "Focus
+# keyword has no word in common with the name" flag (template.html computeFlags: words, isCe, stem), so a cluster the
+# backend can fix never reaches the tool flagged. "Milford Sound Location" takes "milford sound location", not the
+# bigger "milford sound drive".
+_name_stop = {"the", "and", "tickets"} | {v for w in re.split(r"[^a-z0-9]+", fold(CE_NAME)) for v in (w, re.sub(r"s$", "", w))}
+_ce_words = {w for w in re.split(r"[^a-z0-9]+", CE_NAME.lower()) if w}
+
+
+def sig(text):
+    ws = {w for w in re.split(r"[^a-z0-9]+", fold(re.sub(r"\(.*?\)", " ", str(text)))) if len(w) > 2 and w not in _name_stop}
+    ws = {w for w in ws if w not in _ce_words and not (len(w) >= 5 and any(len(c) >= 5 and lev(w, c) <= 2 for c in _ce_words))}
+    return {re.sub(r"s$", "", w) if len(w) > 4 else w for w in ws}
+
+
+# Words that say a search means to buy or book. "cruise", "tour" and the like name a product; a sight's name alone
+# ("bowen falls", "stirling falls") does not.
+# Bookable activities count too: at a water sports or whale watching CE, "surfing phuket" and "whale watching cronulla"
+# are the product.
+BUY_RE = re.compile(r"\b(tickets?|tours?|cruises?|book(ing|ings)?|reserv\w*|prices?|costs?|fees?|deals?|discounts?|cheap\w*|"
+                    r"trips?|excursions?|flights?|fly|helicopters?|heli|kayak\w*|raft\w*|transfers?|bus|coach\w*|shuttles?|"
+                    r"pass(es)?|entry|admission|rentals?|hire|packages?|safaris?|airboats?|boats?|jet ?boats?|rides?|"
+                    r"snorkel\w*|div(e|es|er|ers|ing)|scuba|sail\w*|combo|vouchers?|operators?|charters?|sightseeing|"
+                    r"watch(ing)?|surf\w*|wakeboard\w*|fishing|parasail\w*|jet ?ski\w*|zip ?lin\w*|atvs?|quads?|buggy|buggies|"
+                    r"bungee|skydiv\w*|paraglid\w*|riding|canoe\w*|paddle\w*|bikes?|biking|cycling|segway|ferr(y|ies)|"
+                    r"water ?taxi|glamping|lessons?|classes|course)\b")
+
+
+# The CE's operators, Headout's and the rest, from the pipeline's vendor step (research_ce.py --stage vendors: the
+# vendor_seeds and vendor_noise_filter prompts). A cluster named after one ("Whale Dreamer Sydney") is a booking search
+# even when Headout sells nothing from that operator.
+_vendor_file = ROOT / "snapshots" / f"ce_{CE if CE == 189 else CFG.get('eos_id') or CE}" / "vendor_seeds.json"
+CE_VENDORS = [v["keyword"] for v in json.loads(_vendor_file.read_text())["vendors"]] if _vendor_file.exists() else []
+# Only a sight moves: a cluster named after a place feature ("Bowen Falls", "Heart Reef", "Phi Phi Viewpoint"). A name
+# that is neither a sight nor bookable is more often an operator Headout does not list ("Whale Dreamer Sydney", "Cougar
+# Line"), which stays Transactional; a route ("Railay Beach to Phi Phi Island") is a transfer to book.
+SIGHT_RE = re.compile(r"\b(falls?|waterfalls?|beach(es)?|bay|reef|island|islet|viewpoints?|lookouts?|creek|caves?|lake|lagoon|"
+                      r"peak|mount|mountain|gorge|canyon|cove|point|cape|river|track|trail|boardwalk|garden|gardens|park|"
+                      r"temple|church|cathedral|chapel|museum|monument|memorial|statue|bridge|tower|lighthouse|farm|village|"
+                      r"pier|wharf|harbou?r|sound|fjord|glacier|forest|rainforest|swamp|springs?|rock|cliffs?)\b")
+ROUTE_RE = re.compile(r"\b(to|from)\b")
+_ce_name_words = {w for w in re.split(r"[^a-z0-9]+", fold(CE_NAME)) if w} | {re.sub(r"s$", "", w) for w in re.split(r"[^a-z0-9]+", fold(CE_NAME)) if w}
+_stemw = lambda t: [re.sub(r"s$", "", w) if len(w) > 3 else w for w in re.split(r"[^a-z0-9]+", fold(re.sub(r"'", "", t))) if w]
+# A vendor name made only of the CE's name and generic words ("daintree tours", "milford sound cruises") names no
+# operator a cluster could be about.
+_VENDOR_GENERIC = {"the", "and", "tour", "cruise", "co", "travel", "trip", "group", "company", "holiday", "experience", "adventure"}
+_vendor_phrases = [ph for ph in (_stemw(v) for v in CE_VENDORS)
+                   if ph and set(ph) - _VENDOR_GENERIC - {re.sub(r"s$", "", w) for w in _ce_name_words}]
+
+
+def names_vendor(name):
+    """The cluster's name holds a vendor's name as a phrase: "Cougar Line Picton", "Maverick Helicopter Tours"."""
+    nw = _stemw(name)
+    return any(any(nw[i:i + len(ph)] == ph for i in range(len(nw) - len(ph) + 1)) for ph in _vendor_phrases)
+
+
+def pick_focus(top_kw, name, head):
+    """The biggest keyword that is spelt right and shares a word with the name; else one of the CE's own words alone; else
+    the biggest spelt right."""
+    # Keyword Planner gives close variants one volume; among equals the cluster's own name leads, then the one sharing
+    # most words with it ("southern discoveries milford sound" over "southern discoveries milford"), then the shortest.
+    stem_set = lambda t: {re.sub(r"s$", "", w) if len(w) > 4 else w for w in re.split(r"[^a-z0-9]+", fold(t)) if w}
+    nwords = stem_set(name)
+    top_kw = top_kw.assign(_named=top_kw["k"] != norm(name), _hit=[-len(stem_set(t) & nwords) for t in top_kw["kw"]],
+                           _len=top_kw["k"].str.len()).sort_values(["vol", "_named", "_hit", "_len"], ascending=[False, True, True, True])
+    right = top_kw[top_kw["fix"].isna()] if "fix" in top_kw else top_kw
+    want = sig(str(name).replace("(", " ").replace(")", " "))
+    # A run-together name counts as the name: "mitrepeak cruises" is about Mitre Peak.
+    joined = lambda t: any(len(w) > 3 and w in re.sub(r"[^a-z0-9]", "", fold(t)) for w in want)
+    shares = right[[head or not want or bool(sig(t) & want) or joined(t) for t in right["kw"]]]
+    # A keyword of the CE's own words alone ("milford sound") is not flagged, but one naming the cluster's topic is better.
+    bare = right[[not sig(t) for t in right["kw"]]]
+    for pool in (shares, bare, right, top_kw):
+        if len(pool):
+            return pool["k"].iloc[0]
+    return None
+
+
 for cid, meta in names.iterrows():
     name, k = meta["name"], kw[kw["cid"] == cid]
-    if name.startswith("Other ("):
-        continue
     in_eos = (old.get(cid) or old_by_name.get(name.lower())) is not None
     src = sources(cid)
     p = pairs[pairs["cid"] == cid]
     sp = spread[spread["cid"] == cid]
     o = org_cid[org_cid[COL] == cid]
     clicks, spend, cm1, impr, conv = sp["clicks"].sum(), sp["spend"].sum(), sp["conv_value"].sum(), sp["impr"].sum(), sp["conv"].sum()
+    other = None
+    if cid in oth_cid.index:
+        x = oth_cid.loc[cid]
+        clicks, spend, cm1, impr, conv = clicks + x["clicks"], spend + x["spend"], cm1 + x["conv_value"], impr + x["impr"], conv + x["conv"]
+        other = {"clicks": r(x["clicks"]), "spend": r(x["spend"], 2), "cv": r(x["conv_value"], 2),
+                 "campaigns": [{"name": n, "clicks": r(v)} for n, v in oth_camp.loc[cid].sort_values(ascending=False).head(3).items()]}
     eligible = sp["eligible"].sum()
     top_kw = k.sort_values("vol", ascending=False)
+    focus = pick_focus(top_kw, name, name == HEAD_NAME or "Head Term" in name)
+    top_kw = pd.concat([top_kw[top_kw["k"] == focus], top_kw[top_kw["k"] != focus]])
 
     # Ad groups serving the cluster, from its searches' clicks.
     ag = p.groupby(["ag", "ad_group_name", "campaign_name"]).agg(clicks=("clicks", "sum"), spend=("spend", "sum"), cm1=("conv_value", "sum"),
@@ -399,9 +1068,11 @@ for cid, meta in names.iterrows():
     cl = {
         "id": cid, "name": name, "type": meta["t"], "seeded": not in_eos, "head": name == HEAD_NAME or "Head Term" in name,
         "n_kw": int(len(k)), "vol": r(top_kw["vol"].iloc[0]) if len(top_kw) and pd.notna(top_kw["vol"].iloc[0]) else None,
+        # Coverage's denominator: every keyword family once (Planner gives a family's spellings one shared volume).
+        "vol_total": r(k.assign(f=[fam_of(v, key) for v, key in zip(k["vol"].fillna(0), k["k"])]).groupby("f")["vol"].first().fillna(0).sum()) if len(k) else None,
         "vol_source": "eos", "focus_kw": top_kw["kw"].iloc[0] if len(top_kw) else None,
         "adg": own_ad_group(k, top_kw["kw"].iloc[0] if len(top_kw) else None),
-        "impr": r(impr), "clicks": r(clicks), "spend": r(spend, 2), "google_value": r(cm1, 2), "conv": r(conv, 1),
+        "impr": r(impr), "clicks": r(clicks), "spend": r(spend, 2), "google_value": r(cm1, 2), "conv": r(conv, 1), "other_campaigns": other,
         "paid_revenue": r(paid_rev.get(cid), 2), "n_ad_groups": int(len(ag)),
         "top_ad_group": ag["ad_group_name"].iloc[0] if len(ag) else None,
         "top_ag_purity": r(ag["share"].iloc[0], 3) if len(ag) else None,
@@ -417,6 +1088,7 @@ for cid, meta in names.iterrows():
                   "mix": cv("Themes (share of cluster clicks)")},
         "page_revenue": (src or {}).get("page_revenue"), "pct_ce_revenue": (src or {}).get("pct_ce_revenue"),
         "pages": (src or {}).get("pages", []),
+        "page_ai": PAGE_AI.get(cid),
         "organic_orders": (src or {}).get("organic_orders"), "organic_revenue": (src or {}).get("organic_revenue"),
         "supply": (src or {}).get("supply") or {"n": 0, "live": 0, "revenue": 0, "experiences": []},
         "entity": (src or {}).get("entity") or {"status": "CE collection", "items": []},
@@ -434,8 +1106,8 @@ for cid, meta in names.iterrows():
         # match types it served with. fam groups close variants the way own_ad_group does.
         "keywords": [{"kw": x.kw, "vol": r(x.vol), "clicks": r(s.at[x.k, "clicks"]) if x.k in s.index else None,
                       "oclicks": r(s.at[x.k, "oclicks"]) if x.k in s.index else None, "pos": r(s.at[x.k, "pos"], 1) if x.k in s.index else None,
-                      "targeted": match_types.get(x.k), "live": x.k in kw_ags.index,
-                      "fam": f"v{x.vol:.0f}" if pd.notna(x.vol) and x.vol >= 1000 else f"k{x.k}"} for x in top_kw.itertuples()],
+                      "targeted": match_types.get(x.k), "live": bid_state(x.k)[0] in ("bid", "variant"),
+                      "bid": bid_state(x.k)[0], "as": bid_state(x.k)[1], "fam": fam_of(x.vol, x.k)} for x in top_kw.itertuples()],
         "searches": [{"term": x.term, "kw": bool(x.is_kw), "clicks": r(x.clicks), "spend": r(x.spend, 2), "cm1": r(x.cm1, 2),
                       "ai": r((x.ai or 0) * (x.clicks or 0)), "groups": r(x.groups), "oclicks": r(x.oclicks), "impr": r(x.oimpr), "pos": r(x.pos, 1),
                       "page": None if pd.isna(x.page) else str(x.page).replace("https://", ""),
@@ -487,25 +1159,28 @@ for cid, meta in names.iterrows():
 # Search-term view of each cluster (what Perf reads): the share Google shows, conversions for CM1 per order, and the
 # language split. The campaign's language is the third part of its name ("Rome - Vatican - German - All - ...").
 stba["cid"] = stba["k"].map(pair_cid[COL])
-stba["lang"] = stba["campaign_name"].str.split(" - ").str[2]
+stba["lang"] = stba["campaign_name"].str.split(" - ").str[2].str.strip().str.capitalize()
 st_cid = stba.dropna(subset=["cid"]).groupby("cid")[["impr", "clicks", "spend", "conv", "conv_value"]].sum()
 lang_cid = stba.dropna(subset=["cid"]).groupby(["cid", "lang"])["clicks"].sum()
-st_shown = stba["clicks"].sum() / totals["clicks"].sum()
+st_shown = div(stba["clicks"].sum(), totals["clicks"].sum())
 
-# Ad groups serving a cluster (Paid tab): its search-term clicks by ad group, with the same ad group name in one
-# language counted once across country campaigns (Perf edits them as a set). share_of_group = this cluster's part
-# of that ad group's clicks, which says whether the group is built for the cluster or the cluster rides a generic one.
-group_clicks = stba.groupby(["ad_group_name", "lang"])["clicks"].sum()
+# Ad groups serving a cluster (Paid tab): its search-term clicks by ad group. Copies of one ad group in campaigns that
+# differ only by country (Vatican's "Rome - Vatican - English - Italy/USA - ...") count once, since Perf edits them as a
+# set; ad groups of the same name in campaigns on different themes (Milford's Cruise vs Flights) stay apart. The
+# country is the 4th " - " part of the campaign name. share_of_group = this cluster's part of that ad group's clicks,
+# which says whether the group is built for the cluster or the cluster rides a generic one.
+stba["camp_set"] = stba["campaign_name"].map(lambda n: " - ".join((p := str(n).split(" - "))[:3] + p[4:]) if str(n).count(" - ") >= 4 else str(n))
+group_clicks = stba.groupby(["ad_group_name", "lang", "camp_set"])["clicks"].sum()
 
 
 def ad_groups_serving(cid, cluster_keys):
     mine = stba[stba["cid"] == cid]
     if not mine["clicks"].sum():
         return None
-    g = mine.groupby(["ad_group_name", "lang"]).agg(clicks=("clicks", "sum"), spend=("spend", "sum"), cv=("conv_value", "sum"),
-                                                    countries=("campaign_name", "nunique"), ags=("ag", lambda a: set(a))).reset_index()
+    g = mine.groupby(["ad_group_name", "lang", "camp_set"]).agg(clicks=("clicks", "sum"), spend=("spend", "sum"), cv=("conv_value", "sum"),
+                                                                countries=("campaign_name", "nunique"), ags=("ag", lambda a: set(a))).reset_index()
     g["share_of_cluster"] = g["clicks"] / mine["clicks"].sum()
-    g["share_of_group"] = [c / group_clicks[(a, l)] for a, l, c in zip(g["ad_group_name"], g["lang"], g["clicks"])]
+    g["share_of_group"] = [c / group_clicks[(a, l, s)] for a, l, s, c in zip(g["ad_group_name"], g["lang"], g["camp_set"], g["clicks"])]
     g = g.sort_values("clicks", ascending=False)
     rows = []
     for x in g.head(5).itertuples():
@@ -521,16 +1196,19 @@ def ad_groups_serving(cid, cluster_keys):
 
 # Campaign targets. Portfolio-strategy campaigns carry 0 in the export, so they keep the strategy name.
 troas = pd.read_csv(OUT / f"campaign_troas_{CE}.csv")
+# Keyed by name, so a removed campaign sharing a live one's name (two at the reef) must not overwrite its target.
+troas = troas.assign(_live=troas["campaign_status"].ne("REMOVED")).sort_values("_live") if "campaign_status" in troas else troas
 troas = {x.campaign_name: (r(x.target_roas, 2) if x.target_roas else None, None if pd.isna(x.bidding_strategy_name) else x.bidding_strategy_name)
          for x in troas.itertuples()}
 camp_cid = stba.dropna(subset=["cid"]).groupby(["cid", "campaign_name"])[["clicks", "spend", "conv_value"]].sum()
 
 # Weekly search terms (13 full weeks), mapped with the same term assignments.
 wk = pd.read_csv(OUT / f"search_terms_weekly_{CE}.csv").assign(k=lambda d: d["term"].map(norm))
+wk = wk[en_mask(wk["term"])]
 wk["cid"] = wk["k"].map(pair_cid[COL])
 weeks = sorted(wk["week"].unique())
 wk_cid = wk.dropna(subset=["cid"]).groupby(["cid", "week"])[["impr", "clicks", "spend", "conv_value"]].sum()
-wk_mapped = wk.dropna(subset=["cid"])["clicks"].sum() / wk["clicks"].sum()
+wk_mapped = div(wk.dropna(subset=["cid"])["clicks"].sum(), wk["clicks"].sum())
 # Search terms that cost more than they earned over the 13 weeks, per cluster: the watch list Aditya wants only while a
 # new CE's campaigns learn. 30 clicks keeps noise out; the tool applies Perf's own click floor on top.
 wk_t = (wk.dropna(subset=["cid"]).groupby(["cid", "k"]).agg(term=("term", "first"), clicks=("clicks", "sum"), spend=("spend", "sum"),
@@ -542,7 +1220,7 @@ for cid, g in wk_t.groupby("cid"):
 
 # Quality Score: keywords with a score (0 = not enough traffic), weighted by the keyword's impressions in the window.
 qs = pd.read_csv(OUT / f"quality_score_{CE}.csv")
-qs = qs[qs["quality_score"] > 0].assign(kw_key=lambda d: d["ad_group_id"].astype(str) + "~" + d["criterion_id"].astype(str),
+qs = qs[(qs["quality_score"] > 0) & en_mask(qs["keyword"])].assign(kw_key=lambda d: d["ad_group_id"].astype(str) + "~" + d["criterion_id"].astype(str),
                                         k=lambda d: d["keyword"].map(norm))
 qs = qs.merge(totals[["kw_key", "impr"]], on="kw_key", how="left").fillna({"impr": 0})
 qs["cid"] = qs["k"].map(kw_text_cid)
@@ -557,14 +1235,29 @@ def lp_path(u):
     path = "/" + "/".join(re.sub(r"^https?://[^/]+/?", "", u).strip("/").split("/")) if u else ""
     return host, ("/" if path in ("/", "") else path.rstrip("/") + "/")
 lpr = pd.read_csv(OUT / f"landing_page_results_{CE}.csv").assign(ag=lambda d: d["ad_group_id"].astype(str))
-lpr[["host", "path"]] = pd.DataFrame([lp_path(u) for u in lpr["landing_url"]], index=lpr.index)
+# Where clicks landed comes from Google's landing page view, not the ad's final URL (Milford's Mitre Peak ads point at
+# home, yet three in four of their clicks land on /mitre-peak/). That view has no conversions, so each ad group's
+# conversions are shared over its landing pages by clicks. An ad group the view lacks keeps the final-URL rows.
+_lpv_file = OUT / f"landing_page_views_{CE}.csv"
+if _lpv_file.exists() and _lpv_file.stat().st_size:
+    lpv = pd.read_csv(_lpv_file)
+    ag_of = {(c, a): str(ag) for ag, a, c in zip(ag_meta.index, ag_meta["ad_group_name"], ag_meta["campaign_name"])}
+    lpv["ag"] = [ag_of.get((c, a)) for c, a in zip(lpv["campaign_name"], lpv["ad_group_name"])]
+    lpv = lpv.dropna(subset=["ag"])
+    conv_ag = lpr.groupby("ag")[["conv", "conv_value"]].sum()
+    lpv_share = (lpv["clicks"] / lpv.groupby("ag")["clicks"].transform("sum").replace(0, np.nan)).fillna(0)
+    for col in ("conv", "conv_value"):
+        lpv[col] = lpv["ag"].map(conv_ag[col]).fillna(0) * lpv_share
+    lpr = pd.concat([lpv[["campaign_name", "ag", "landing_url", "clicks", "impr", "spend", "conv", "conv_value"]],
+                     lpr[~lpr["ag"].isin(set(lpv["ag"]))]], ignore_index=True)
+lpr[["host", "path"]] = pd.DataFrame([lp_path(u) for u in lpr["landing_url"]], index=lpr.index, columns=["host", "path"])
 # Where the cluster's core ad group sends its clicks: the final URL with most clicks across that ad group's ads.
 core_lp = lpr.assign(ag_name=lpr["ag"].map(ads["ad_group_name"])).groupby(["ag", "host", "path"])["clicks"].sum().reset_index()
 for cl in clusters:
     adg = cl["adg"]
     if not adg.get("ag"):
         continue
-    core = next((a for a in live_ags if ads.at[a, "ad_group_name"] == adg["ag"] and ads.at[a, "campaign_name"] == adg["campaign"]), None)
+    core = next((a for a in live_ags if a in ag_meta.index and ag_meta.at[a, "ad_group_name"] == adg["ag"] and ag_meta.at[a, "campaign_name"] == adg["campaign"]), None)
     rows = core_lp[core_lp["ag"] == core].sort_values("clicks", ascending=False)
     if len(rows) and rows["clicks"].sum():
         adg["landing"] = {"host": rows["host"].iloc[0], "path": rows["path"].iloc[0], "share": r(rows["clicks"].iloc[0] / rows["clicks"].sum(), 3)}
@@ -711,25 +1404,35 @@ def page_shows(key, row):
                           for t in tp.itertuples()]}
 
 
-# Products a cluster's searches ask for, matched by name across every product any page of the CE lists: all the words of
-# the cluster's name, else all the words of its focus keyword, once the CE's own name and filler words are set aside.
-SP_STOP = {"the", "and", "with", "from", "for", "price", "prices", "cost", "best", "cheap", "near", "how", "what", "when",
-           "where", "book", "booking", "online", "official", "head", "term", "general"}
-CE_WORDS = set(CFG.get("name_words", [])) if CE != 189 else {"vatican", "museums", "museum"}
-fold = lambda t: unicodedata.normalize("NFKD", str(t).lower()).encode("ascii", "ignore").decode()
-stem = lambda w: w[:-1] if len(w) > 4 and w.endswith("s") else w
-sp_words = lambda t: {stem(w) for w in re.split(r"[^a-z0-9]+", fold(re.sub(r"\(.*?\)", " ", str(t)))) if len(w) > 2 and w not in SP_STOP and fold(w) not in {fold(x) for x in CE_WORDS}}
-catalog = pp.drop_duplicates("experience_id")[["experience_id", "experience_name"]].assign(w=lambda d: d["experience_name"].map(sp_words))
+# Products a cluster's searches ask for, matched by name across every product any page of the CE lists. A cluster name
+# is read as alternatives split at "/", "&", "," and brackets ("Helicopter Tours & Flights" = helicopter, or flights;
+# "Small Boat / Boutique / Luxury / Private" = any of them; "+" joins, so a combo needs both sides). A product matches an
+# alternative when it has all its words, after the CE's name, filler and product formats are set aside and synonyms meet
+# (heli = helicopter, flights = fly = flyover = plane, coach = bus = transfer). The focus keyword is tried when the name
+# finds nothing. A cluster whose name and focus keyword hold nothing beyond the CE's name and a format ("Cruise Tickets &
+# Booking", "Deals & Discounts", "Milford Sound Tours / Day Trips (General)") asks for the CE's product itself: its supply is what the CE's
+# own collection sells.
+catalog = pp.drop_duplicates("experience_id")[["experience_id", "experience_name"]].assign(w=lambda d: d["experience_name"].map(toks))
+_exp_orders = vord.groupby("experience_id")["count_orders"].sum()
+ce_sold = (pp[pp["collection_id"] == str(CE)].assign(o=lambda d: d["experience_id"].map(_exp_orders).fillna(0))
+           .sort_values("o", ascending=False)["experience_id"].drop_duplicates())
 
 
 def searched_products(cl):
-    for want in (sp_words(cl["name"]), sp_words(cl["focus_kw"])):
-        if not want:
-            continue
-        hit = catalog[catalog["w"].map(lambda w: want <= w)]
+    hit, want = catalog.iloc[0:0], set()
+    # Only the name decides "the CE's product itself": a focus keyword can be a misspelling ("millford sound tour").
+    tried = any(sp_alts(cl["name"]))
+    for text in (cl["name"], cl["focus_kw"]):
+        alts = [a for a in sp_alts(text) if a]
+        for a in alts:
+            m = catalog[catalog["w"].map(lambda w: a <= w)]
+            if len(m):
+                hit, want = pd.concat([hit, m]).drop_duplicates("experience_id"), want | a
         if len(hit):
             break
-    else:
+    if not tried:
+        hit = catalog[catalog["experience_id"].isin(set(ce_sold.head(8)))]
+    if not len(hit):
         return []
     out = []
     for x in hit.itertuples():
@@ -745,8 +1448,14 @@ def searched_products(cl):
 
 
 # The CE's home is its Payload "Theme" page: the bare host on most sites, /home on Park Güell's.
-_pg_all = pd.read_csv(HERE / "hybrid" / "pages_189.csv" if CE == 189 else OUT / f"pages_{CE}.csv", usecols=["uid", "page_type"])
-_theme = _pg_all.loc[_pg_all["page_type"] == "Theme", "uid"]
+_pg_all = pd.read_csv(HERE / "hybrid" / "pages_189.csv" if CE == 189 else OUT / f"pages_{CE}.csv", dtype={"collection_id": str})
+# A draft Theme page (Everglades /test) is not the CE's home: new page URLs would be proposed under it.
+_live = _pg_all["status_en"].eq("published") if "status_en" in _pg_all else True
+_theme = _pg_all.loc[(_pg_all["page_type"] == "Theme") & _pg_all["uid"].str.startswith(HOST) & _live]
+_theme = _theme.iloc[_theme["uid"].str.len().argsort()]
+# On a city site every CE has a Theme page; the CE's own lists its collection. The page column builds new URLs under it.
+_own = _theme[_theme["collection_id"].fillna("").str.split(".").str[0] == str(CE if CE == 189 else CFG.get("eos_id") or CE)]
+_theme = (_own if len(_own) else _theme)["uid"]
 HOME_PATH = "/" + "/".join(_theme.iloc[0].split(".")[len(HOST.split(".")):]) if len(_theme) else "/"
 
 
@@ -792,6 +1501,24 @@ for cl in clusters:
             row["select"] = None if f is None else r(f["select_sessions"] / f["sessions"], 3)
         dr["lp"] = sorted(rows, key=lambda d: -d["clicks"])[:10]
     dr["searched_products"] = searched_products(cl)
+    # Transactional needs a reason to sell: a keyword with buying intent ("bowen falls tickets"), or a product the CE sells
+    # for it. A sight with neither (Bowen Falls, Stirling Falls on a Milford cruise) is Informational, so nobody reads it
+    # as a page to build. A cluster named after an operator, and the head term, keep their type: an
+    # operator's name is itself a booking search. With intent but no product (Mitre Peak: "mitre peak cruise" searches,
+    # no Mitre Peak product), it stays Transactional and page_needed says no page of its own.
+    intent = any(BUY_RE.search(t) for t in kw.loc[kw["cid"] == cid, "k"])
+    supply = bool(cl["supply"]["n"]) or bool(dr["searched_products"])
+    operator = cluster_operator(cid) is not None or names_vendor(cl["name"])
+    cl["checks"] = {"intent": intent, "supply": supply, "operator": operator,
+                    "page_needed": None if cl["type"] != "TRANSACTIONAL" else bool(supply or operator or cl["head"])}
+    # The CE's own name words do not make a sight: every Milford cluster says "sound", every Niagara one "falls".
+    own = " ".join(w for w in re.split(r"[^a-z0-9]+", fold(cl["name"])) if w and w not in _ce_name_words)
+    sight = bool(SIGHT_RE.search(own)) and not ROUTE_RE.search(fold(cl["name"]))
+    cl["checks"]["sight"] = sight
+    if cl["type"] == "TRANSACTIONAL" and sight and not (intent or supply or operator or cl["head"]):
+        cl["type"] = "INFORMATIONAL"
+        cl["checks"]["page_needed"] = None
+        cl["changes"]["why_type"] = "Moved from Transactional: no keyword with buying intent and no product for it"
     for pg in cl["pages"]:
         pg["funnel"] = page_funnel(pg["path"])
     on_page, shown = page_products(cl)
@@ -820,26 +1547,112 @@ for cl in clusters:
         kw_row["qs"] = r(v, 1) if v is not None and pd.notna(v) else None
 
 unc = pd.read_csv(WB / "uncaptured.csv").sort_values("Paid impressions / month", ascending=False) if CE == 189 else pd.DataFrame()
+if len(unc):
+    unc = unc[en_mask(unc["Search-term cluster"])].assign(
+        **{"Top searches": lambda d: d["Top searches"].fillna("").map(lambda v: " | ".join(t for t in v.split(" | ") if is_en(t)))})
 total_paid_clicks = pairs["clicks"].sum()
 mapped_paid_clicks = pairs.loc[pairs["cid"].notna(), "clicks"].sum()
 ce = dict(v3["ce"])
-ce.update({"search_terms_shown": r(st_shown, 3), "weeks": [str(w) for w in weeks], "weekly_mapped": r(wk_mapped, 3), "paid_clicks_mapped": r(mapped_paid_clicks / total_paid_clicks, 3), "organic_clicks_mapped": r(org_cid["clicks"].sum() / org["clicks"].sum(), 3),
+# The CE's paid totals as Google Ads reports them by campaign (search network), which includes clicks Google ties to
+# no keyword; the clusters split the keyword-level totals, so the gap between the two is shown, not hidden.
+CT_FILE = OUT / f"campaign_totals_{CE}.csv"
+if CT_FILE.exists():
+    ct = pd.read_csv(CT_FILE)
+    ct = ct[ct["network"] == "SEARCH"]
+    all_paid = {"clicks": r(ct["clicks"].sum()), "spend": r(ct["spend"].sum(), 2), "conv_value": r(ct["conv_value"].sum(), 2)}
+else:
+    all_paid = None
+# The header is the English searches' share of every keyword's totals, across all the CE's campaigns; the CE's whole
+# Google Ads total (every language, and clicks tied to no keyword) is kept beside it.
+paid_ce = {"clicks": r(totals["clicks"].sum()), "spend": r(totals["spend"].sum(), 2), "conv_value": r(totals["conv_value"].sum(), 2),
+           "from": "searches", "all": all_paid, "campaigns": int(pairs.loc[pairs["clicks"] > 0, "campaign_name"].nunique()),
+           "other": {"clicks": r(oth_cid["clicks"].sum()), "spend": r(oth_cid["spend"].sum(), 2), "conv_value": r(oth_cid["conv_value"].sum(), 2),
+                     "unplaced_clicks": r(oth.loc[oth["cid"].isna(), "clicks"].sum()),
+                     "campaigns": int(oth.loc[oth["clicks"] > 0, "campaign_name"].nunique())} if len(oth) else None}
+ce.update({"search_terms_shown": r(st_shown, 3), "weeks": [str(w) for w in weeks], "weekly_mapped": r(wk_mapped, 3), "paid_clicks_mapped": r(div(mapped_paid_clicks, total_paid_clicks), 3), "organic_clicks_mapped": r(div(org_cid["clicks"].sum(), org["clicks"].sum()), 3),
            "home": HOME_PATH,
            # The CE's own Google Ads totals and live keywords, account-wide: the header reads these, not a sum over clusters
            # (clusters share searches), and a search that is already a live keyword anywhere is never suggested as one to add.
-           "paid": {"clicks": r(totals["clicks"].sum()), "spend": r(totals["spend"].sum(), 2), "conv_value": r(totals["conv_value"].sum(), 2)},
-           "live_keywords": sorted(kw_ags.index), "home_funnel": page_funnel(HOME_PATH), "paid_revenue_traced": r(traced_share, 3), "clusters_from": "hybrid_eos_v5" if CE == 189 else "hybrid_11ce"})
-data = {"ce": ce, "clusters": clusters, "page_shows": shows, "pages_no_cluster": [{"path": x.url, "type": x.page_sub_type, "focus": x.text, "revenue": r(x.revenue, 2)}
+           "paid": paid_ce, "scope": "English",
+           # A placeholder CE ("18 - Key West") is keyed by a stand-in number; its real id is what people know it by.
+           "label": None if CE == 189 else CFG.get("eos_id"),
+           "paid_keyword": {"clicks": r(totals["clicks"].sum()), "spend": r(totals["spend"].sum(), 2), "conv_value": r(totals["conv_value"].sum(), 2)},
+           "kw_snapshot": KW_SNAPSHOT,
+           "live_keywords": sorted(kw_ags.index), "home_funnel": page_funnel(HOME_PATH), "paid_revenue_traced": r(traced_share, 3), "paid_revenue_own_search": r(own_search_share, 3), "clusters_from": "hybrid_eos_v5" if CE == 189 else "hybrid_11ce",
+           # Every child collection and POI under the CE, so Set-up can name the entity a live page lists.
+           "entities": [{"type": x.entity_type, "id": str(x.entity_id), "name": x.name, "active": bool(x.is_active),
+                         **({"operator": True} if x.operator else {})} for x in ents.itertuples()]})
+if len(ents):
+    ce["banner"] = ce.get("banner", "").replace(", Headout entities.", ".")
+# Keyword research for the tool's Seeds drawer: the seeds prompt's seeds with what became of each, and the CE's vendors.
+# A CE EOS researched has no seed list of ours (its keywords came from EOS), so only its vendors show.
+_rsnap = ROOT / "snapshots" / f"ce_{CE if CE == 189 else CFG.get('eos_id') or CE}"
+_num = lambda f: int(f.stem.split("_")[-1])
+
+
+def planner_volumes(paths):
+    """Keyword Planner's downloaded ideas (UTF-16, tab-separated, two title lines): keyword -> avg monthly searches."""
+    found = {}
+    for path in paths:
+        df = pd.read_csv(path, sep="\t", encoding="utf-16", skiprows=2)
+        vol = pd.to_numeric(df["Avg. monthly searches"].astype(str).str.replace(",", ""), errors="coerce").fillna(0)
+        for t, v in zip(df["Keyword"].astype(str).str.strip().str.lower(), vol):
+            found[t] = max(found.get(t, 0), int(v))
+    return found
+
+
+def research_block():
+    files = sorted(_rsnap.glob("planner_ideas_*.csv"), key=_num)
+    # Files 1-8 are the seeds' searches, 9 onward the vendor seeds' (full_ce.sh).
+    seed_vol, vendor_vol = planner_volumes([f for f in files if _num(f) <= 8]), planner_volumes([f for f in files if _num(f) >= 9])
+    kept = set(pd.read_csv(_rsnap / "eos_keywords.csv")["term"].map(norm)) if (_rsnap / "eos_keywords.csv").exists() else set()
+    kw_cid = dict(zip(kw["k"], kw["cid"]))
+    cid_of = lambda t: (lambda c: c if c in names.index else None)(kw_cid.get(norm(t)))
+    seeds = []
+    if (_rsnap / "seeds.json").exists() and files:
+        for x in json.loads((_rsnap / "seeds.json").read_text()):
+            t, v = x["keyword"], seed_vol.get(x["keyword"])
+            status = ("kept" if norm(t) in kept and v else "kept, no searches" if norm(t) in kept
+                      else "not returned by Keyword Planner" if v is None else "no searches" if v == 0 else "cut by the 1,000 cap")
+            seeds.append({"kw": t, "category": x.get("category"), "vol": v, "status": status, "cid": cid_of(t)})
+    vendors = []
+    if (_rsnap / "vendor_seeds.json").exists():
+        vj = json.loads((_rsnap / "vendor_seeds.json").read_text())
+        internal = [squash(i["name"]) for i in vj.get("internal", [])]
+        # Vendor lists written before research_ce.searchable() still carry legal suffixes; clean them the same way.
+        clean = lambda t: re.sub(r"[\s,]*\b(co\.?,?\s*ltd\.?|pty\.?\s*ltd\.?|pte\.?\s*ltd\.?|ltd\.?|limited|inc\.?|llc|co\.?|corporation|corp\.?)\s*$", "",
+                                 re.split(r"\btrading as\b|\bt/as?\b", t, flags=re.I)[-1], flags=re.I).strip(" -,.").lower()
+        for name in dict.fromkeys(clean(clean(x["keyword"])) for x in vj["vendors"]):
+            sq = squash(name)
+            if not sq:
+                continue
+            own = [c for c in names.index if any(_stemw(names.at[c, "name"])[i:i + len(ph)] == ph
+                                                 for ph in [_stemw(name)] for i in range(len(_stemw(names.at[c, "name"])) - len(ph) + 1))]
+            exps = xp[[bool(sq) and sq in squash(v) for v in xp["vendors"].fillna("")]]
+            vendors.append({"name": name, "source": "Headout vendor" if any(sq and (sq in i or i in sq) for i in internal) else "web",
+                            "vol": vendor_vol.get(name) if vendor_vol else None, "live": int(exps["live"].sum()) if len(exps) else 0,
+                            "cid": own[0] if own else cid_of(name)})
+    return {"source": "ours" if seeds else "eos", "seeds": seeds, "vendors": vendors}
+
+
+data = {"research": research_block(), "ce": ce, "clusters": clusters, "page_shows": shows, "pages_no_cluster": [{"path": x.url, "type": x.page_sub_type, "focus": x.text, "revenue": r(x.revenue, 2),
+                                                                                    "why": None if pd.isna(x.why_no_cluster) else x.why_no_cluster,
+                                                                                    "tag": None if pd.isna(x.tag) else x.tag}
                              for x in hpages[hpages["cid"].isna()].sort_values("revenue", ascending=False).itertuples()],
         "uncaptured": [{"name": x._3, "intent": x.Intent, "searches": x.Searches, "paid_impr": r(x._6), "organic_impr": r(x._7),
                         "organic_clicks": r(x._8), "top": x._9} for x in unc.head(30).itertuples()],
         "unmapped_terms": [], "unmapped_organic": [], "change_log": v3.get("change_log", []),
         "sources": {"clusters": CLUSTERS.parent.name, "paid": f"{SNAP.name} keyword totals, spread by served searches",
-                    "pairs": PAIR_RUN, "organic": ORGANIC_RUN, "pages_products_entities": f"{SOURCES.parent.name if SOURCES else 'none'}; {PAGES.name}"}}
+                    "pairs": PAIR_RUN, "organic": ORGANIC_RUN, "pages_products_entities": f"supply: {SOURCES.parent.name if SOURCES else 'none'}; pages: {PAGES.name}; entities: {ENTS_FILE.name}"}}
 OUT.mkdir(exist_ok=True)
 (OUT / DATA).write_text(json.dumps(data, separators=(",", ":")))
+# The working behind every paid number, for audit_paid.py: each keyword's totals as split over clusters, and each
+# search term (with the keyword Google says served it) and the cluster it was placed in.
+spread[["kw_key", "cid", "impr", "clicks", "spend", "conv_value", "w_clicks"]].to_csv(OUT / f"audit_spread_{CE}.csv", index=False)
+pairs[["kw_key", "ag", "term", "impr", "clicks", "spend", "conv_value", "cid", "how"]].to_csv(OUT / f"audit_terms_{CE}.csv", index=False)
+totals_all.merge(totals[["kw_key", *METRICS]], on="kw_key", suffixes=("_all", "_en")).to_csv(OUT / f"audit_keywords_{CE}.csv", index=False)
 (OUT / "drawer.json").write_text(json.dumps({"clusters": drawer}, separators=(",", ":")))
-(OUT / "impression_share.json").write_text(json.dumps({"window": "30 Jul - 27 Oct", "hidden_spend": 0, "total_spend": r(spread["spend"].sum(), 2),
+(OUT / "impression_share.json").write_text(json.dumps({"window": WINDOW_LABEL, "hidden_spend": 0, "total_spend": r(spread["spend"].sum(), 2),
                                                         "clusters": {c["id"]: {"catch_all": c["catch_all"]} for c in clusters}}))
 print(f"{len(clusters)} clusters; paid clicks {r(spread['clicks'].sum())}, spend {r(spread['spend'].sum())}, CM1 {r(spread['conv_value'].sum())}; "
       f"paid revenue traced {'n/a' if traced_share is None else f'{traced_share:.0%}'}; clusters with a page {sum(bool(c['pages']) for c in clusters)}")

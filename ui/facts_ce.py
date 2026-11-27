@@ -17,6 +17,7 @@ from pathlib import Path
 import pandas as pd
 
 HERE = Path(__file__).resolve().parent
+NO_SITE = "www.no-microbrand.invalid"
 
 
 def main():
@@ -31,10 +32,17 @@ def main():
     env = {**os.environ, "CLOUDSDK_CONFIG": str(Path(os.environ.get("TMPDIR", "/tmp")) / "gcloud_pull_ce")}
     sql = ("SELECT combined_entity_category AS category, combined_entity_subcategory AS subcategory "
            "FROM `headout-analytics.analytics_reporting.dim_combined_entities` "
-           f"WHERE CAST(combined_entity_id AS STRING) = '{a.ce}'")
+           f"WHERE CAST(combined_entity_id AS STRING) = '{cfg.get('eos_id', a.ce)}'")
     res = subprocess.run(["bq", "query", "--use_legacy_sql=false", "--format=json", "--quiet"], input=sql,
                          capture_output=True, text=True, env=env, check=True)
-    row = json.loads(res.stdout)[0]
+    rows = json.loads(res.stdout or "[]")
+    if rows:
+        row = rows[0]
+    else:
+        # A CE not created yet: its category is the one the clustering pipeline was given (ce_sources.csv).
+        from run_ce import ROOT
+        src = pd.read_csv(ROOT / "ce_sources.csv", dtype=str).set_index("ce").loc[cfg.get("eos_id", a.ce)]
+        row = {"category": src["subcat"], "subcategory": src["subcat"]}
     kw = pd.read_csv(HERE / "pipeline_local" / "snapshots" / cfg["snapshot"] / "cluster_keywords.csv")
     head = kw[(kw["name"] == cfg.get("head")) | kw["name"].str.contains("Head Term", case=False)]
     aliases = head.sort_values("vol", ascending=False)["kw"].str.lower().drop_duplicates().head(6).tolist()
@@ -43,7 +51,7 @@ def main():
              "category": "Cruise" if str(row["category"]).startswith("Cruise") else row["category"],
              "subcategory": row["subcategory"], "aliases": aliases,
              "components": [], "artworks": [], "artists": [], "areas": [], "origins": [], "operators": [],
-             "own_brand": [site, site.replace("-", " ")],
+             "own_brand": [] if cfg["host"] == NO_SITE else [site, site.replace("-", " ")],
              "source": "derived: CE type and category from dim_combined_entities, aliases from the head cluster's keywords; "
                        "parts, artworks, areas and operators not set"}
     out.write_text(json.dumps(facts, indent=1, ensure_ascii=False) + "\n")

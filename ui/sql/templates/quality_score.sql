@@ -7,8 +7,8 @@ WITH campaigns AS (
 
     FROM `segment-data.google_adwords_prepaid.p_ads_Campaign_6251119615`
 
-    WHERE _PARTITIONTIME = TIMESTAMP('2026-10-28')
-          AND REGEXP_CONTAINS(campaign_name, r'cid__CE__$')
+    WHERE _PARTITIONTIME = TIMESTAMP('__END_1__')
+          AND REGEXP_CONTAINS(campaign_name, r'cid__CE__\b')
 
 ),
 
@@ -30,7 +30,7 @@ final AS (
     INNER JOIN campaigns
         ON keywords.campaign_id = campaigns.campaign_id
 
-    WHERE keywords._PARTITIONTIME = TIMESTAMP('2026-10-28')
+    WHERE keywords._PARTITIONTIME = TIMESTAMP('__END_1__')
           AND keywords.ad_group_criterion_status = 'ENABLED'
 
 )

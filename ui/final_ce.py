@@ -12,6 +12,7 @@ decisions saved against it in the browser.
 """
 import argparse
 import json
+import subprocess
 import sys
 import uuid
 from datetime import datetime
@@ -50,16 +51,27 @@ def main():
     p.add_argument("--prompt", choices=["original", "patched"], default="original")
     a = p.parse_args()
     root, ce = Path(a.root).resolve(), a.ce
-    final = root / "snapshots" / (f"ce_{ce}" + ("_patched" if a.prompt == "patched" else "")) / "final"
+    reg = json.loads((HERE / "ces.json").read_text())
+    cfg = reg["ces"][ce]
+    # A CE whose real id is not a number ("18 - Key West") is keyed here by a stand-in number; the pipeline knows it by
+    # its real id.
+    eos = cfg.get("eos_id", ce)
+    final = root / "snapshots" / (f"ce_{eos}" + ("_patched" if a.prompt == "patched" else "")) / "final"
     if not (final / "clusters.csv").exists():
         raise SystemExit(f"No pipeline output at {final}; run run_ce_pipeline.py {ce} first.")
     sys.path.insert(0, str(HERE))
-    from map_ce import build_snapshot
+    from map_ce import SOURCE, build_snapshot
+    from snapshot_ce import snapshot_dir
 
-    reg = json.loads((HERE / "ces.json").read_text())
-    cfg = reg["ces"][ce]
     snap_name = f"final_{cfg['slug']}" + ("_patched" if a.prompt == "patched" else "")
-    snap = build_snapshot(root, ce, snap_name)
+    frozen = pd.read_csv(root / "snapshots" / SOURCE / "ce_names.csv", dtype={"ce": str})["ce"]
+    if eos in set(frozen):
+        snap = build_snapshot(root, ce, snap_name)
+    else:
+        fresh = snapshot_dir(root, eos)
+        if not (fresh / "ce_names.csv").exists():
+            subprocess.run([sys.executable, str(HERE / "snapshot_ce.py"), str(root), eos], check=True)
+        snap = build_snapshot(root, ce, snap_name, source=fresh, source_ce=eos)
 
     clusters = pd.read_csv(final / "clusters.csv")
     kws = pd.read_csv(final / "keywords.csv")
