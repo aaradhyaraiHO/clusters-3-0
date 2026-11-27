@@ -1338,7 +1338,9 @@ const l5L=c=>S.L[c.id]||(S.lstate[c.id]==='launched'?{at:null}:null);
 const l5Ask=c=>{const a=askState(c),d=ASKS_()[c.id];if(a?.v==='notnow')return null;return a&&a.v!=='agree'?a.v:d?.type||null};
 const l5NeedsPage=c=>!OTHER(c)&&TR(c)&&!c.pages.length&&sepOf(c)==='yes';
 const l5NeedsSupply=c=>TR(c)&&!prodState(c).yes&&(l5NeedsPage(c)||!!l5Ask(c));
-const l5Steps=c=>{if(OTHER(c))return[];const st=[];if(l5NeedsSupply(c))st.push('supply');if(l5NeedsPage(c))st.push(LAUNCH_DIRECT.has(pageTypeOf(c))?'page':'content');if(l5Ask(c))st.push('perf');return st};
+// A live page whose page type needs a child collection or POI it does not have: the sheet's existing-CE steps create it.
+const l5NeedsEntity=c=>c.pages.length>0&&['coll','poi'].some(k=>{const s=entSlot(c,k);return s.need&&['gap','new'].includes(s.state)});
+const l5Steps=c=>{if(OTHER(c))return[];const st=[];if(l5NeedsSupply(c))st.push('supply');if(l5NeedsEntity(c))st.push('entity');if(l5NeedsPage(c))st.push(LAUNCH_DIRECT.has(pageTypeOf(c))?'page':'content');if(l5Ask(c))st.push('perf');return st};
 function l5Stage(c){
   if(!l5L(c))return null;
   if(S.perfAt[c.id])return{t:'Launched',k:'acc',n:`Perf asked ${fmtD(S.perfAt[c.id])}`};
@@ -1361,8 +1363,9 @@ function lnchCell(c){
 /* The agent plan Launch shows, in order: what it runs now and what it queues for content and Perf. */
 function l5Plan(c){const st=l5Steps(c),pt=pageTypeOf(c),a=l5Ask(c),L=[];
   if(st.includes('supply'))L.push('Ask growth or the BDM to add an experience (automatic once keyword-collection matching lands)');
-  if(st.includes('page'))planOf(c).filter(x=>!/content brief/i.test(x)).forEach(x=>L.push(x));
-  if(st.includes('page'))L.push(`Queue the draft for the next Send to content${st.includes('supply')?', once it has a product':''}`);
+  if(st.includes('entity')){bizSteps(c).forEach(x=>L.push(x));((ENT[pageTypeOf(c)]||FAM.info).steps.mbFolder||[]).forEach(x=>L.push(esc(x)))}
+  if(st.includes('page'))planOf(c).filter(x=>!/^Content brief/.test(x)).forEach(x=>L.push(x));
+  if(st.includes('page'))L.push(`Queue the draft for the next Send to content${st.includes('supply')?', once it has a product':''}: ${esc(planOf(c).find(x=>/^Content brief/.test(x)).replace(/^Content brief: /,''))}`);
   if(st.includes('content'))L.push(`Queue for the next Send to content: ${esc(ptLabel(pt))}, ${contentWhy(pt)}${st.includes('supply')?', once it has a product':''}`);
   if(st.includes('perf'))L.push(c.pages.length?`Send the Perf ask to Perf's tool: ${askTitle(c,a)}`:`Queue the Perf ask for when the page is live: ${String(askTitle(c,a)).replace(/ once its page is live/i,'')}`);
   return L}
@@ -2112,13 +2115,55 @@ function analysisView(){
 }
 
 /* ---------- Execution: two hand-offs from the same final clusters ---------- */
-/* Page planning rules (Krupa's page planning sheet): the page type decides which Headout entities a page needs, whether it
-   gets a subdomain by default, and how its products are fetched. Sub-attraction B's collection is optional (20 Oct). */
-const FAM={landing:{coll:'none',poi:'none',subd:true,fetch:'CE ID'},subcat:{coll:'none',poi:'none',subd:false,fetch:'CE ID + subcategory'},
-  custom:{coll:'none',poi:'none',subd:false,fetch:'Manual product list'},brand:{coll:'create',poi:'none',subd:true,fetch:'Child collection ID'},
-  subA:{coll:'none',poi:'create',subd:true,fetch:'POI ID within the parent collection'},subB:{coll:'optional',poi:'create',subd:true,fetch:'Child collection ID'},
-  subC:{coll:'create',poi:'create',subd:true,fetch:'Child collection ID'},child:{coll:'create',poi:'none',subd:true,fetch:'Child collection ID'},
-  info:{coll:'none',poi:'none',subd:false,fetch:'CE ID'}};
+/* Page planning rules: Krupa's page planning sheet (Google Sheet 1AIE94km2OYwEzSNvYvQpnIqDQ6JQ_rGh1hsz6NWOh3E), row by
+   row. The sheet is the source: an edit there must be copied here. Each page family has the sheet's steps for an existing
+   CE and for a new CE: catalog (biz), Headout content (ho), microbrand site set-up (mb) and microbrand content (mbc), plus
+   the entities it needs and how its products are fetched. For an existing CE the site steps depend on whether the
+   subfolder is live already (mbFolder / mbNoFolder). */
+// ces.json gives a CE that has no CE ID yet a placeholder key from 900001; the sheet's New CE rows apply to it.
+const NEW_CE=!!D.ce.new_ce||Number(D.ce.id)>=900001;
+const SITE_NEW=['Launch the subfolder','Create the subdomain and map it to the folder'];
+const SITE_COND={mbNoFolder:SITE_NEW,mbFolder:['Create the subdomain and map it to the folder, if it has none'],
+  mbcNoFolder:['Set up the subfolder','Create content','Media','Localise'],mbcFolder:['Update content','Media, if needed','Localise']};
+const SHOULDER='Create the shoulder page (after the Payload migration)';
+const PAYLOAD_HO=['Create Headout content in Payload','Media','Localise'];
+const SUB_BC_EXISTING=['Check the child collection exists; create it if not','Map TGIDs to the child collection',
+  'Check the child POI exists; create it if not','Check the child POI is mapped to the child collection',
+  'Check the child POI is mapped to the parent POI','Fill in the child POI’s schedule and location',
+  'Check the city’s collection ranking (header mapping)'];
+const SUB_BC_NEW=['Create the child collection','Map TGIDs to the child collection','Create the child POI ID',
+  'Map the child POI to the child collection','Map the child POI to the parent POI','Fill in the child POI’s schedule and location',
+  'Check the city’s collection ranking (header mapping)'];
+const RULES={
+  landing:{coll:'none',poi:'none',fetch:'CE ID',
+    existing:{subd:false,biz:['Map new experiences (TGIDs) to the CE'],ho:['Update Atlas content','Media, if needed','Localise'],mb:[],mbc:['Update LFC','Media, if needed','Localise']},
+    new:{subd:true,biz:['Create the CE ID','Map TGIDs to the CE','For a POI CE: create the POI ID and map it to the CE ID'],ho:['Fill Atlas content','Media and localise'],mb:SITE_NEW,mbc:['Add LFC','Media and localise']}},
+  subcat:{coll:'none',poi:'none',fetch:'CE ID + subcategory',
+    existing:{subd:false,biz:['Map TGIDs to the subcategory'],ho:[SHOULDER],mb:[],mbc:['Find existing pages','Revamp them so product cards filter by the subcategory','Set up the finalised pages that do not exist','Create content','Media and localise']},
+    new:{subd:false,biz:['Map TGIDs to the subcategory'],ho:[SHOULDER],mb:[],mbc:['Find existing pages','Revamp them so product cards filter by the subcategory','Set up the finalised pages that do not exist','Create content','Media and localise']}},
+  custom:{coll:'none',poi:'none',fetch:'Manual product list',
+    existing:{subd:false,biz:[],ho:[SHOULDER],mb:[],mbc:['Map TGIDs for experiences outside a subcategory','Find existing pages','Revamp existing pages','Set up the finalised pages that do not exist','Create content','Media and localise']},
+    new:{subd:false,biz:[],ho:[SHOULDER],mb:[],mbc:['Map TGIDs for experiences outside a subcategory','Set up the finalised pages','Create content','Media and localise']}},
+  brand:{coll:'create',poi:'none',fetch:'Child collection ID',
+    existing:{subd:true,biz:['If the supply is new: create the child collection if it does not exist','Map TGIDs to the child collection'],ho:PAYLOAD_HO,mbNoFolder:SITE_NEW,mbFolder:[],mbc:['Create or update content','Media, if needed','Localise']},
+    new:{subd:true,biz:['Create the child collection','Map TGIDs to the child collection'],ho:PAYLOAD_HO,mb:SITE_NEW,mbc:['Add LFC','Media and localise']}},
+  info:{coll:'none',poi:'none',fetch:'CE ID',
+    existing:{subd:false,biz:[],ho:[SHOULDER],mb:[],mbc:['Find existing pages','Revamp existing pages','Set up the finalised pages that do not exist','Create content','Media and localise']},
+    new:{subd:false,biz:[],ho:[SHOULDER],mb:[],mbc:['Set up the finalised pages','Create content','Media and localise']}},
+  subA:{coll:'none',poi:'create',fetch:'POI ID within the parent collection',
+    existing:{subd:true,biz:['Check the child POI exists; create it if not','Check the child POI is mapped to the parent POI','Fill in the child POI’s schedule and location'],ho:['Update Atlas content','Media, if needed','Localise'],...SITE_COND},
+    new:{subd:true,biz:['Create the child POI ID','Map it to the parent POI ID'],ho:['Fill Atlas content','Media and localise'],mb:SITE_NEW,mbc:['Set up the subfolder (if no subdomain is needed)','Create content','Media','Localise']}},
+  subB:{coll:'create',poi:'create',fetch:'Child collection ID',
+    existing:{subd:true,biz:SUB_BC_EXISTING,ho:['Update Atlas content','Media, if needed','Localise'],...SITE_COND},
+    new:{subd:true,biz:SUB_BC_NEW,ho:['Fill Atlas content','Media and localise'],mb:SITE_NEW,mbc:['Set up the subfolder','Create content','Media','Localise']}},
+  subC:{coll:'create',poi:'create',fetch:'Child collection ID',
+    existing:{subd:true,biz:SUB_BC_EXISTING,ho:['Update Atlas content','Media, if needed','Localise'],...SITE_COND},
+    new:{subd:true,biz:SUB_BC_NEW,ho:['Fill Atlas content','Media and localise'],mb:SITE_NEW,mbc:['Set up the subfolder','Create content','Media','Localise']}},
+  child:{coll:'create',poi:'none',fetch:'Child collection ID',
+    existing:{subd:true,biz:['Check the child collection exists; create it if not','Map TGIDs to the child collection'],ho:PAYLOAD_HO,...SITE_COND},
+    new:{subd:true,biz:['Create the child collection','Map TGIDs to the child collection'],ho:PAYLOAD_HO,mb:SITE_NEW,mbc:['Set up the subfolder','Create content','Media','Localise']}}};
+const FAM=Object.fromEntries(Object.entries(RULES).map(([f,r])=>{const s=r[NEW_CE?'new':'existing'];
+  return [f,{coll:r.coll,poi:r.poi,fetch:r.fetch,subd:s.subd,steps:s}]}));
 /* Canonical page types from the cluster-to-page mapping prompt (Clustering <> page mapping, July 6 update), grouped by the
    page planning sheet's families. Only the first group are pages that sell; the rest are content-only shoulder pages. */
 const PT_SELL={'Landing Page':'landing','Tours':'subcat','Guided Tours':'subcat','Audio Guide Tours':'subcat','Private Tours':'subcat','Combos':'subcat',
@@ -2412,20 +2457,30 @@ function noPageSection(){
    </tbody></table></div></section>`;
 }
 /* ---------- Launch confirm: the plan the page planning rules produce, shown before anything is created. ---------- */
-function planOf(c){const t=pageTypeOf(c),R=ENT[t],a=entSlot(c,'coll'),b=entSlot(c,'poi'),kw=focusLabel(c)||nm(c),L=[];
-  if(a.state==='found')L.push(`Use collection ${esc(a.name||'')} (${esc(a.id)})`);
-  else if(['new','gap'].includes(a.state))L.push(`Create the child collection (type keyword) under ${esc(String(D.ce.id))} for “${esc(kw)}”`);
-  if(b.state==='found')L.push(`Use POI ${esc(b.name||'')} (${esc(b.id)}); check it is mapped to the parent POI`);
-  else if(['new','gap'].includes(b.state))L.push('Create the POI, map it to the parent POI, fill schedule and location');
-  if(/Sub-attraction [BC]/i.test(t))L.push('Check the collection ranking for the city (header mapping)');
-  L.push(`Launch the subfolder at ${esc(slugOf(c))}`);
-  if(subdOn(c))L.push(`Create the subdomain ${esc(subdUrlOf(c))} and point it at the subfolder`);
-  L.push(`Products fetched by ${R.fetch}`);L.push('Raise the content brief: copy, media, localisation');return L}
+// The sheet's catalog steps for the cluster's page type, with each entity step saying what exists and what gets created.
+function bizSteps(c){const R=ENT[pageTypeOf(c)]||FAM.info,a=entSlot(c,'coll'),b=entSlot(c,'poi'),kw=focusLabel(c)||nm(c);
+  const coll=()=>a.state==='found'?`Child collection: ${esc(a.name||'')} (${esc(a.id)}) exists, use it`
+      :a.state==='none'?null:`Create the child collection (type keyword) under ${esc(String(D.ce.id))} for “${esc(kw)}”`;
+  const poi=x=>b.state==='found'?`Child POI: ${esc(b.name||'')} (${esc(b.id)}) exists, use it`
+      :b.state==='none'?null:'Create the child POI'+(/ID$/.test(x)?' ID':'');
+  return R.steps.biz.map(x=>/child collection exists|^Create the child collection|create the child collection if/i.test(x)?coll(x)
+    :/child POI exists|^Create the child POI/i.test(x)?poi(x):esc(x)).filter(Boolean)}
+const contentSteps=c=>{const s=(ENT[pageTypeOf(c)]||FAM.info).steps,folder=c.pages.length>0;
+  return {ho:s.ho,mbc:s.mbc||(folder?s.mbcFolder:s.mbcNoFolder)||[]}};
+function planOf(c){const R=ENT[pageTypeOf(c)]||FAM.info,s=R.steps,folder=c.pages.length>0,L=bizSteps(c);
+  const site=s.mb||(folder?s.mbFolder:s.mbNoFolder)||[];
+  // run_ce.py gives a CE with no microbrand this placeholder host; its subfolder and subdomain wait for a site to be picked.
+  const noSite=HOST==='www.no-microbrand.invalid';
+  site.forEach(x=>{if(/^Launch the subfolder/.test(x))L.push(noSite?`Launch the subfolder ${esc(slugOf(c))} once a microbrand site is picked`:`Launch the subfolder ${esc(slugOf(c))}`);
+    else if(/subdomain/.test(x)&&(folder||subdOn(c)))L.push(folder?esc(x):noSite?'Create the subdomain and map it to the folder, once a microbrand site is picked':`Create the subdomain ${esc(subdUrlOf(c))} and map it to the folder`)});
+  L.push(`Products fetched by ${R.fetch}`);
+  const k=contentSteps(c);L.push(`Content brief: Headout: ${k.ho.join(', ')}. Microbrand: ${k.mbc.join(', ')}`);
+  return L}
 function launchConfirmLayer(){const R=S.lrun, L=(R?R.ids:S.lconfirm).map(id=>byId[id]);let k=0;
   const li=x=>{const i=k++, st=!R?'':i<R.i?'done':i===R.i?'cur':'wait';return `<li class="lrow ${st}">${R?`<span class="lico">${st==='done'?'✓':st==='cur'?'<span class="lspin"></span>':''}</span>`:''}<span>${x}</span></li>`};
   const done=R&&R.i>=R.steps.length;
   return `<div class="lback"><div class="lbox${R?' running':''}" role="dialog" aria-label="Launch">
-   <div class="lhead"><div><div class="s">Execution · ${esc(D.ce.name)}</div><h2>${done?'Launched':R?'Launching':'Launch'} ${L.length===1?esc(nm(L[0])):`${n(L.length)} pages`}</h2></div><button class="x" data-lcancel aria-label="Close">×</button></div>
+   <div class="lhead"><div><div class="s">Execution · ${esc(D.ce.name)} · ${NEW_CE?'New CE (no CE ID yet): the page planning sheet’s New CE steps':'Existing CE: the page planning sheet’s Existing CE steps'}</div><h2>${done?'Launched':R?'Launching':'Launch'} ${L.length===1?esc(nm(L[0])):`${n(L.length)} pages`}</h2></div><button class="x" data-lcancel aria-label="Close">×</button></div>
    <p class="s">${R?(done?'Every step ran. Anything content writes goes in the next Send to content; Perf asks go once their pages are live.':'The agent works through the plan and skips what already exists.'):'The agent creates only what is missing, in this order. Nothing is created until you launch.'}</p>
    <div class="${R?'lgrid':''}"><div>${L.map(c=>`<div class="plan"><b>${esc(nm(c))}</b> <span class="pill mute">${esc(pageTypeOf(c))}</span><ol class="lplan">${l5Plan(c).map(li).join('')}</ol></div>`).join('')}</div>
    ${R?`<aside class="lagent"><b class="s">Agent</b>${R.log.map(m=>`<p>${m}</p>`).join('')||'<p class="s">Starting…</p>'}</aside>`:''}</div>
