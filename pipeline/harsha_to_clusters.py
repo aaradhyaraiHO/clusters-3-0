@@ -55,7 +55,11 @@ def main():
         # "no data" clusters (an empty playbook topic, primaryKeyword null) hold no keyword and are left out
         empty = [c["name"] for c in out if not c.get("primaryKeyword")]
         out = sorted([c for c in out if c.get("primaryKeyword")], key=lambda c: c["rank"])
-        unclaimed = {norm(k["keyword"]): (k["keyword"], k["searchVolume"]) for k in pack["keywordData"]}
+        # The prompt excludes any keyword containing a negative keyword (its step 4); the regex pass must too, or a
+        # competitor search ("viator grand canyon") is claimed by the cluster whose identifier it contains.
+        neg = [norm(n) for n in pack.get("negativeKeywords") or [] if norm(n)]
+        unclaimed = {norm(k["keyword"]): (k["keyword"], k["searchVolume"]) for k in pack["keywordData"]
+                     if not any(claims(n, norm(k["keyword"])) for n in neg)}
         for c in out:
             cid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{ce}|harsha|{c['name']}"))
             ids = c.get("identifiers") or [c.get("primaryIdentifier", "")]

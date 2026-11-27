@@ -9,11 +9,11 @@ eos_keywords.csv that run_ce_pipeline.py clusters.
    ce_sources.csv; up to 80 seeds, each with its intent. Vendor seeds go to Keyword Planner with them.
 2. Ideas: Google Keyword Planner (KeywordPlanIdeaService) on the seeds, 20 per request, English, every location, Google
    Search, the same basis as EOS's volumes. Seeds are kept with their own volume.
-3. Keep: every seed with 10+ searches a month (the seeds prompt's intents are never cut by the cap; a seed with
-   fewer searches has no demand and is dropped), then ideas that name the CE or a seed's own words (not a generic
-   travel word alone), with 10+ searches a month, the highest-volume ones up to MAX_KEYWORDS. EOS lists run about
-   200 keywords (Milford 199, Key West 207) and reach about 1,000 for a broad CE (Phi Phi 1,038). Keywords naming a
-   competitor brand are dropped, seeds included.
+3. Keep: every seed, whatever its searches (the seeds prompt's intents are never cut by the cap), then ideas that
+   name the CE or a seed's own words (not a generic travel word alone), with 10+ searches a month, the highest-volume
+   ones up to MAX_KEYWORDS. EOS lists run about 200 keywords (Milford 199, Key West 207) and reach about 1,000 for a
+   broad CE (Phi Phi 1,038). Competitor brands stay in the list: the clusters prompt excludes them as negative
+   keywords (negative_keywords.json).
 
 Writes snapshots/ce_<CE>/eos_keywords.csv (ce, term, vol) and research.json (seeds, settings, counts). Keyword Planner
 credentials come from the Google Ads tool's .env (GOOGLE_ADS_* variables); the account is any client account under
@@ -48,10 +48,6 @@ COMMON_WORD_VOLUME = 10000
 GENERIC = set("""tickets ticket tours tour cruise cruises day trip trips the and of to from in at near best top cheap price prices
 cost book booking deals deal guided guide private group small half full city island islands park national things do visit
 visiting what how is are a for with by on hotel hotels map weather review reviews""".split())
-# Competitor and reseller brands: their searches are someone else's demand. The first part is the same list as
-# is_competitor in bq/eos_base.sql, which EOS's own keyword lists are cleaned with; keep the two in step.
-COMPETITOR = re.compile(r"\b(tiqets|getyourguide|get your guide|gyg|klook|viator|musement|civitatis|tripadvisor|city wonders|"
-                        r"walks of italy|headout|go city|isango|airbnb|groupon|experienceoz|experience oz|expedia)\b")
 # What people add to an operator's name when they mean to book with it.
 BOOKING = set("""reservation reservations reservations contact phone number website login promo code coupon discount voucher
 gift card refund cancellation schedule hours open opening times rates booking online""".split())
@@ -201,10 +197,9 @@ def keep(ideas, seeds, name, vendors=(), vendor_ideas=None):
                     return True
         return False
 
-    rival = lambda t: bool(COMPETITOR.search(" ".join(words(t))))
-    seed_rows = [(s, ideas.get(s, 0)) for s in dict.fromkeys(seeds) if ideas.get(s, 0) >= MIN_VOLUME and not rival(s)]
+    seed_rows = [(s, ideas.get(s, 0)) for s in dict.fromkeys(seeds)]
     seed_set = {s for s, _ in seed_rows}
-    rows = [(t, v) for t, v in ideas.items() if v >= MIN_VOLUME and anchors & set(words(t)) and t not in seed_set and not rival(t)]
+    rows = [(t, v) for t, v in ideas.items() if v >= MIN_VOLUME and anchors & set(words(t)) and t not in seed_set]
     rows = seed_rows + sorted(rows, key=lambda r: -r[1])[:MAX_KEYWORDS]
     # Operator searches are low volume next to the CE's generic ones, so they get their own room instead of competing
     # for MAX_KEYWORDS: at Niagara the cap's cut-off is 880 searches a month, above most operators' own searches.
@@ -212,7 +207,7 @@ def keep(ideas, seeds, name, vendors=(), vendor_ideas=None):
     # region's generic tours ("tasmania tours" for Port Arthur), which the CE's own seeds already cover.
     have = dict(rows)
     pool = {**(vendor_ideas or {}), **ideas}
-    vendor_rows = [(t, v) for t, v in pool.items() if v >= MIN_VOLUME and t not in have and about_vendor(t, v) and not rival(t)]
+    vendor_rows = [(t, v) for t, v in pool.items() if v >= MIN_VOLUME and t not in have and about_vendor(t, v)]
     rows += sorted(vendor_rows, key=lambda r: -r[1])[:MAX_VENDOR_KEYWORDS]
     return sorted(rows, key=lambda r: -r[1]), sorted(anchors)
 

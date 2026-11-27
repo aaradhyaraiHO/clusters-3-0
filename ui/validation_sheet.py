@@ -18,9 +18,18 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 PIPELINE = Path("/Users/aaradhyarai/analytics/.claude/worktrees/clusters-3-0/scripts/clusters_3_0")
 GWS = "/opt/homebrew/bin/gws"
-# Same list as research_ce.py COMPETITOR in the pipeline: the Checks tab counts any that reached a keyword list.
-COMPETITOR = re.compile(r"\b(tiqets|getyourguide|get your guide|gyg|klook|viator|musement|civitatis|tripadvisor|city wonders|"
-                        r"walks of italy|headout|go city|isango|airbnb|groupon|experienceoz|experience oz|expedia)\b")
+# The clusters prompt's negative keywords (pipeline negative_keywords.json): a clustered keyword containing one is a miss.
+NEGATIVE = json.loads((PIPELINE / "negative_keywords.json").read_text())
+
+
+def negatives(ce):
+    return list(dict.fromkeys(NEGATIVE["all"] + NEGATIVE.get("by_ce", {}).get(str(ce), [])))
+
+
+def negative_re(ce):
+    return re.compile(r"\b(" + "|".join(re.escape(n) for n in negatives(ce)) + r")\b")
+
+
 INTENT = {"TRANSACTIONAL": "Transactional", "PLANNING": "Planning", "INFORMATIONAL": "Informational"}
 MAPPING = {"existing_page": "Existing page", "no_existing_page": "No existing page", "needs_review": "Not sure"}
 REVIEW_HEAD = ["Right? (Y/N)", "Comment"]
@@ -77,6 +86,10 @@ def ce_rows(key, cfg, prompts_rev):
         for v in sorted(research["vendors"], key=lambda v: -(v.get("vol") or 0)):
             add([v["name"], v.get("source") or "", v.get("vol"), v.get("live"), name_of(v.get("cid")), "", ""])
     add([])
+    add(["NEGATIVE KEYWORDS: a keyword containing one is left out of every cluster"], "section")
+    add(["Negative keywords", "", "", "", "", *REVIEW_HEAD], "head")
+    add([", ".join(negatives(cfg.get("eos_id", key))), "", "", "", "", "", ""])
+    add([])
     add(["CLUSTERS, with their keywords under each"], "section")
     add(["Cluster / keyword", "Intent", "Searches / mo", "Focus keyword", "Page mapping (prompt)", "Existing page",
          "Separate page (prompt)", "Page type (prompt)", "Cluster right? (Y/N)", "Page type right? (Y/N)", "Comment"], "head")
@@ -100,7 +113,9 @@ def checks_row(key, cfg, data, drawer, research):
         for w in drawer.get(c["id"], {}).get("keywords", []):
             kws.setdefault(w["kw"], set()).add(c["id"])
     seeds = research.get("seeds") or []
-    pipe = PIPELINE / "snapshots" / f"ce_{cfg.get('eos_id', key)}" / "pipeline.json"
+    ce_id = cfg.get("eos_id", key)
+    neg = negative_re(ce_id)
+    pipe = PIPELINE / "snapshots" / f"ce_{ce_id}" / "pipeline.json"
     agree = ""
     if pipe.exists():
         ra = (json.loads(pipe.read_text()).get("cluster") or {}).get("run_agreement")
@@ -111,16 +126,16 @@ def checks_row(key, cfg, data, drawer, research):
     pct = lambda a, b: f"{a / b:.0%}" if b else "n/a"
     return [data["ce"]["name"], cfg.get("eos_id", key),
             "yes" if research.get("source") != "eos" and seeds else "no (EOS list)",
-            sum(1 for s in seeds if s.get("status", "").startswith("kept")), sum(1 for s in seeds if s.get("status") == "no searches"),
-            sum(1 for s in seeds if "cap" in str(s.get("status"))), len(research.get("vendors") or []),
-            sum(1 for k in kws if COMPETITOR.search(k)), "not set",
+            sum(1 for s in seeds if s.get("status", "").startswith("kept")), sum(1 for s in seeds if s.get("status") == "kept, no searches"),
+            sum(1 for s in seeds if not s.get("status", "").startswith("kept")), len(research.get("vendors") or []),
+            len(negatives(ce_id)), sum(1 for k in kws if neg.search(k)),
             len(clusters), len(kws), sum(1 for v in kws.values() if len(v) > 1), agree, pct(focus_in, len(clusters)),
             pct(sum(1 for a in ai if a.get("mapping")), len(ai)), pct(sum(1 for a in no_page if a.get("separate_page")), len(no_page)),
             pct(sum(1 for a in ai if a.get("page_type")), len(ai))]
 
 
-CHECKS_HEAD = ["CE", "CE id", "Seeds prompt ran", "Seeds kept", "Seeds dropped (no searches)", "Seeds cut by the cap (should be 0)",
-               "Vendor seeds", "Competitor keywords in the list (should be 0)", "Negative keywords", "Clusters", "Keywords",
+CHECKS_HEAD = ["CE", "CE id", "Seeds prompt ran", "Seeds kept", "of which no searches", "Seeds left out (should be 0)",
+               "Vendor seeds", "Negative keywords", "Clustered keywords containing one (should be 0)", "Clusters", "Keywords",
                "Keywords in 2+ clusters (should be 0)", "Clustering runs agreement", "Focus keyword inside its cluster",
                "Page mapping answered", "Separate page answered (clusters with no page)", "Page type answered"]
 READ_ME = [["How to review"], [],

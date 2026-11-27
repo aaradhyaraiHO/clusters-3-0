@@ -212,11 +212,17 @@ def pair_agreement(a, b):
     return sum((ma[x] == ma[y]) == (mb[x] == mb[y]) for x, y in pairs) / max(1, len(pairs))
 
 
+def negatives(ce):
+    """The clusters prompt's negative keywords for a CE: negative_keywords.json's terms for every CE, plus its own."""
+    n = json.loads((HERE / "negative_keywords.json").read_text())
+    return list(dict.fromkeys(n["all"] + n.get("by_ce", {}).get(str(ce), [])))
+
+
 def cluster(ce, src, snap, runs, llm):
     global pack_keywords
     kw = pd.read_csv(snap / "eos_keywords.csv").sort_values("vol", ascending=False)
     pack = {"ceName": src["name"], "ceCity": src["city"], "ceCountry": src["country"], "ceSubcat": src["subcat"],
-            "negativeKeywords": [], "keywordData": [{"keyword": t, "searchVolume": int(v) if pd.notna(v) else 0}
+            "negativeKeywords": negatives(ce), "keywordData": [{"keyword": t, "searchVolume": int(v) if pd.notna(v) else 0}
                                                     for t, v in zip(kw["term"], kw["vol"])]}
     pack_keywords = [k["keyword"] for k in pack["keywordData"]]
     (snap / "inputs").mkdir(exist_ok=True)
