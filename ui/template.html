@@ -956,8 +956,9 @@ body{background:#f8f8f8}
 /* Column order (27 Nov): widths that fit a 1440 window. Setup status keeps its place and is sticky: scrolled sideways,
    it stops against the Cluster column (--stk, that column's width, is set after each render). */
 .ctbl col.w-sticky{width:186px}.ctbl th.sticky,.ctbl td.sticky{min-width:186px;max-width:186px}
-.ctbl col.w-vol{width:100px}.ctbl col.w-status{width:130px}.ctbl col.w-fold{width:64px}.ctbl col.w-setup{width:190px}
-.ctbl col.w-prod{width:136px}.ctbl col.w-url{width:216px}.ctbl col.w-ptype{width:128px}.ctbl col.w-cov{width:104px}.ctbl col.w-own{width:136px}
+.ctbl col.w-vol{width:140px}.ctbl col.w-status{width:146px}.ctbl col.w-fold{width:64px}.ctbl col.w-setup{width:190px}
+.ctbl col.w-prod{width:150px}.ctbl col.w-url{width:216px}.ctbl col.w-ptype{width:140px}.ctbl td.c-ptype .lockt{white-space:normal}.ctbl td.c-ptype select{max-width:100%}.ctbl td.c-status .cell{min-width:0}.ctbl td.c-status .s{white-space:normal}.ctbl col.w-cov{width:156px}.ctbl col.w-own{width:136px}
+.ctbl td.c-cov,.ctbl td.c-own{white-space:normal}.ctbl td.c-cov .s,.ctbl td.c-own .s{white-space:normal;overflow-wrap:anywhere}
 .ctbl th.c-setup,.ctbl td.c-setup{position:sticky;left:var(--stk,186px);z-index:2;background:var(--bg);box-shadow:6px 0 8px -6px rgba(17,17,17,.18)}
 .ctbl thead th.c-setup{z-index:4}.ctbl tbody tr.row:hover td.c-setup{background:var(--panel)}.ctbl tbody tr.sel td.c-setup{background:var(--accent-soft)}
 .ctbl thead tr.g th.dec{color:var(--accent-ink)}
