@@ -81,11 +81,17 @@ def eos_keywords(ce):
 def pull_searches(ce, src, snap, kw):
     window = """(SELECT MAX(_PARTITIONTIME) FROM `segment-data.google_adwords_prepaid.p_ads_Campaign_6251119615`
                  WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY))"""
+    # other_terms (ce_sources.csv): the CE's searches that other campaigns buy count too (Grand Canyon's are bought by a
+    # Las Vegas helicopter campaign), so they are placed like its own. Only searches matching it, never a whole campaign.
+    other = str(src.get("other_terms") or "").strip()
+    scope = f"(campaigns.own OR REGEXP_CONTAINS(LOWER(stats.search_term_view_search_term), r'{other}'))" if other else "campaigns.own"
     paid = bq(f"""
         WITH latest AS (SELECT {window} AS t),
         campaigns AS (
-            SELECT DISTINCT campaign_id FROM `segment-data.google_adwords_prepaid.p_ads_Campaign_6251119615`
-            WHERE _PARTITIONTIME = (SELECT t FROM latest) AND REGEXP_EXTRACT(campaign_name, r'cid(\\d+)\\b') = '{ce}')
+            SELECT campaign_id, LOGICAL_OR(REGEXP_EXTRACT(campaign_name, r'cid(\\d+)\\b') = '{ce}') AS own
+            FROM `segment-data.google_adwords_prepaid.p_ads_Campaign_6251119615`
+            WHERE _PARTITIONTIME = (SELECT t FROM latest)
+            GROUP BY 1)
         SELECT '{ce}' AS ce, LOWER(stats.search_term_view_search_term) AS term, SUM(stats.metrics_impressions) AS impr,
             SUM(stats.metrics_clicks) AS clicks, ROUND(SUM(stats.metrics_cost_micros) / 1e6, 2) AS spend,
             ROUND(SUM(stats.metrics_conversions), 2) AS conv, ROUND(SUM(stats.metrics_conversions_value), 2) AS conv_value
@@ -93,6 +99,7 @@ def pull_searches(ce, src, snap, kw):
         INNER JOIN campaigns USING (campaign_id)
         WHERE stats._PARTITIONTIME BETWEEN TIMESTAMP_SUB((SELECT t FROM latest), INTERVAL 90 DAY) AND (SELECT t FROM latest)
               AND stats.segments_ad_network_type = 'SEARCH'
+              AND {scope}
         GROUP BY 1, 2 HAVING impr >= 3 OR clicks > 0""")
     # A CE with no campaigns (or no Search Console pages) still gets the file with its columns, so later steps read 0 rows.
     if paid.empty:

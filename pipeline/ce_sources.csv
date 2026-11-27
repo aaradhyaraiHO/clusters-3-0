@@ -1,44 +1,44 @@
-ce,name,city,country,subcat,gsc_sites,page_regex
-189,Vatican Museums,Rome,Italy,Museum / Gallery,https://www.thevaticantickets.com/,vatican|sistine
-325,Park Güell,Barcelona,Spain,Landmark / POI,,park-guell
-243,Eiffel Tower,Paris,France,Landmark / POI,,eiffel-tower
-257,Moulin Rouge,Paris,France,Activity / Experience,,moulin-rouge
-261,Seine River Cruises,Paris,France,Cruise,,seine
-2010,Harry Potter Walking Tours,London,United Kingdom,Walking Tour,,harry-potter
-3176,Montserrat Monastery,Barcelona,Spain,Day Trip,,montserrat
-1695,Sydney Whale Watching Cruises,Sydney,Australia,Cruise,https://www.tickets-sydney.com/,whale
-2640,Hot Air Balloon Cappadocia,Cappadocia,Turkey,Adventure Activity,https://www.hotairballoons-cappadocia.com/ https://www.tours-cappadocia.com/,balloon
-3945,Milford Sound Cruises,Milford Sound,New Zealand,Cruise,https://www.milford-sound-cruises.co.nz/,milford-sound
-2743,Great Barrier Reef Cruises,Cairns,Australia,Cruise,,great-barrier-reef
-2405,Phi Phi Island Tours,Phuket,Thailand,Cruise,https://www.phiphi-islands-tours.com/,phi-phi|phiphi
-18 - Key West,Cruises - Key West,Key West,United States,Cruise,,key-west
-18 - Los Angeles,Cruises - Los Angeles,Los Angeles,United States,Cruise,,los-angeles
-10 - Phuket,Water Sports - Phuket,Phuket,Thailand,Water Sports,,water-sport|jet-ski|parasail
-2835,Daintree National Park,Cairns,Australia,Day Trip,https://www.cairnstickets.com/,daintree
-5720,ATV Adventure Phuket,Phuket,Thailand,Adventure Activity,https://www.phuket-tickets.com/,atv
-6835,Picton Tours,Picton,New Zealand,Day Trip,,picton
-3646,Port Arthur Historic Site,Hobart,Australia,Cruises- Day Trips,,port-arthur-historic-site
-4821,Kakadu National Park Tickets,Darwin,Australia,POI,,kakadu-national-park
-5956,Waiheke Island,Auckland,New Zealand,Day Trips,,waiheke-island
-6677,Kangaroo Island Tours,Adelaide,Australia,Day Trips,https://www.kangaroo-island-tours.com/,kangaroo-island|kangaroo\-island\-tours
-6756,Fiji Islands Day Tours,Denarau Island,Fiji,Cruises- Day Trips,https://www.fijitickets.com/,fiji-islands|fijitickets
-1642,Melbourne To Great Ocean Road Tours,Melbourne,Australia,Day Trips,,melbourne-great-ocean-road
-5817,Similan Islands,Phuket,Thailand,POI,,similan-islands
-3097,Everglades,Miami,United States,Cruises- Day Trips,https://www.everglades-tickets.com/,everglades|everglades\-tickets
-6072,Pearl Harbor,Hawaii,United States,Day Trips - Ticketed,,pearl-harbor
-528,Grand Canyon Tours,Las Vegas,United States,Day Trips - Ticketed,https://www.grand-canyon-tours.com/,grand-canyon|grand\-canyon\-tours
-6073,Oahu Grand Circle Island Tours,Hawaii,United States,Cruises- Day Trips,,oahu-grand-circle-island
-18 - Seattle,Cruises - Seattle,Seattle,United States,Cruises- Whale Watching,,seattle.*cruise|cruise.*seattle
-2402,James Bond Island Tours,Phuket,Thailand,Cruises- Day Trips,https://www.jamesbondisland-tours.com/,james-bond-island|jamesbondisland\-tours
-1664,Bangkok Floating Market Tours,Bangkok,Thailand,Day Trips,https://www.bangkok-floating-market-tour.com/,bangkok-floating-market|bangkok\-floating\-market\-tour
-3697,Brisbane to Fraser Island Tours,Brisbane,Australia,Cruises- Whale Watching,https://www.fraser-island-tours.com/,brisbane-fraser-island|fraser\-island\-tours
-2554,Niagara Falls (Canada) Tours,Niagara Falls Canada,Canada,Day Trips - Ticketed,,niagara-falls-canada
-3164,Clearwater Beach,Orlando,United States,Cruises- Day Trips,,clearwater-beach
-18 - Ottawa,Cruises - Ottawa,Ottawa,Canada,Cruises- Sightseeing,,ottawa.*cruise|cruise.*ottawa
-18 - Vancouver,Cruises - Vancouver,Vancouver,Canada,Cruises- Sightseeing,,vancouver.*cruise|cruise.*vancouver
-18 - Clearwater,Cruises - Clearwater,Clearwater,United States,Cruises- Whale Watching,,clearwater.*cruise|cruise.*clearwater
-6986,Yellowstone National Park Tours,Las Vegas,United States,,,yellowstone-national-park
-Ko Samui Tours,Ko Samui Tours,Koh Samui,Thailand,Tours,,samui
-Bangkok City Tours,Bangkok City Tours,Bangkok,Thailand,City Tours,,bangkok.*city-tour|city-tour.*bangkok
-Chiang Mai City Tours,Chiang Mai City Tours,Chiang Mai,Thailand,City Tours,,chiang-mai.*city-tour|city-tour.*chiang-mai
-Cruises - St. Augustine,Cruises - St. Augustine,St. Augustine,United States,Cruise,,st-augustine.*cruise|cruise.*st-augustine
+ce,name,city,country,subcat,gsc_sites,page_regex,other_terms
+189,Vatican Museums,Rome,Italy,Museum / Gallery,https://www.thevaticantickets.com/,vatican|sistine,
+325,Park Güell,Barcelona,Spain,Landmark / POI,,park-guell,
+243,Eiffel Tower,Paris,France,Landmark / POI,,eiffel-tower,
+257,Moulin Rouge,Paris,France,Activity / Experience,,moulin-rouge,
+261,Seine River Cruises,Paris,France,Cruise,,seine,
+2010,Harry Potter Walking Tours,London,United Kingdom,Walking Tour,,harry-potter,
+3176,Montserrat Monastery,Barcelona,Spain,Day Trip,,montserrat,
+1695,Sydney Whale Watching Cruises,Sydney,Australia,Cruise,https://www.tickets-sydney.com/,whale,
+2640,Hot Air Balloon Cappadocia,Cappadocia,Turkey,Adventure Activity,https://www.hotairballoons-cappadocia.com/ https://www.tours-cappadocia.com/,balloon,
+3945,Milford Sound Cruises,Milford Sound,New Zealand,Cruise,https://www.milford-sound-cruises.co.nz/,milford-sound,
+2743,Great Barrier Reef Cruises,Cairns,Australia,Cruise,,great-barrier-reef,
+2405,Phi Phi Island Tours,Phuket,Thailand,Cruise,https://www.phiphi-islands-tours.com/,phi-phi|phiphi,
+18 - Key West,Cruises - Key West,Key West,United States,Cruise,,key-west,
+18 - Los Angeles,Cruises - Los Angeles,Los Angeles,United States,Cruise,,los-angeles,
+10 - Phuket,Water Sports - Phuket,Phuket,Thailand,Water Sports,,water-sport|jet-ski|parasail,
+2835,Daintree National Park,Cairns,Australia,Day Trip,https://www.cairnstickets.com/,daintree,
+5720,ATV Adventure Phuket,Phuket,Thailand,Adventure Activity,https://www.phuket-tickets.com/,atv,
+6835,Picton Tours,Picton,New Zealand,Day Trip,,picton,
+3646,Port Arthur Historic Site,Hobart,Australia,Cruises- Day Trips,,port-arthur-historic-site,
+4821,Kakadu National Park Tickets,Darwin,Australia,POI,,kakadu-national-park,
+5956,Waiheke Island,Auckland,New Zealand,Day Trips,,waiheke-island,
+6677,Kangaroo Island Tours,Adelaide,Australia,Day Trips,https://www.kangaroo-island-tours.com/,kangaroo-island|kangaroo\-island\-tours,
+6756,Fiji Islands Day Tours,Denarau Island,Fiji,Cruises- Day Trips,https://www.fijitickets.com/,fiji-islands|fijitickets,
+1642,Melbourne To Great Ocean Road Tours,Melbourne,Australia,Day Trips,,melbourne-great-ocean-road,
+5817,Similan Islands,Phuket,Thailand,POI,,similan-islands,
+3097,Everglades,Miami,United States,Cruises- Day Trips,https://www.everglades-tickets.com/,everglades|everglades\-tickets,
+6072,Pearl Harbor,Hawaii,United States,Day Trips - Ticketed,,pearl-harbor,
+528,Grand Canyon Tours,Las Vegas,United States,Day Trips - Ticketed,https://www.grand-canyon-tours.com/,grand-canyon|grand\-canyon\-tours,grand canyon
+6073,Oahu Grand Circle Island Tours,Hawaii,United States,Cruises- Day Trips,,oahu-grand-circle-island,
+18 - Seattle,Cruises - Seattle,Seattle,United States,Cruises- Whale Watching,,seattle.*cruise|cruise.*seattle,
+2402,James Bond Island Tours,Phuket,Thailand,Cruises- Day Trips,https://www.jamesbondisland-tours.com/,james-bond-island|jamesbondisland\-tours,
+1664,Bangkok Floating Market Tours,Bangkok,Thailand,Day Trips,https://www.bangkok-floating-market-tour.com/,bangkok-floating-market|bangkok\-floating\-market\-tour,
+3697,Brisbane to Fraser Island Tours,Brisbane,Australia,Cruises- Whale Watching,https://www.fraser-island-tours.com/,brisbane-fraser-island|fraser\-island\-tours,
+2554,Niagara Falls (Canada) Tours,Niagara Falls Canada,Canada,Day Trips - Ticketed,,niagara-falls-canada,
+3164,Clearwater Beach,Orlando,United States,Cruises- Day Trips,,clearwater-beach,
+18 - Ottawa,Cruises - Ottawa,Ottawa,Canada,Cruises- Sightseeing,,ottawa.*cruise|cruise.*ottawa,
+18 - Vancouver,Cruises - Vancouver,Vancouver,Canada,Cruises- Sightseeing,,vancouver.*cruise|cruise.*vancouver,
+18 - Clearwater,Cruises - Clearwater,Clearwater,United States,Cruises- Whale Watching,,clearwater.*cruise|cruise.*clearwater,
+6986,Yellowstone National Park Tours,Las Vegas,United States,,,yellowstone-national-park,
+Ko Samui Tours,Ko Samui Tours,Koh Samui,Thailand,Tours,,samui,
+Bangkok City Tours,Bangkok City Tours,Bangkok,Thailand,City Tours,,bangkok.*city-tour|city-tour.*bangkok,
+Chiang Mai City Tours,Chiang Mai City Tours,Chiang Mai,Thailand,City Tours,,chiang-mai.*city-tour|city-tour.*chiang-mai,
+Cruises - St. Augustine,Cruises - St. Augustine,St. Augustine,United States,Cruise,,st-augustine.*cruise|cruise.*st-augustine,

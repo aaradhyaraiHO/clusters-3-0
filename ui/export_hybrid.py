@@ -97,6 +97,11 @@ is_en = english_checker([CE_NAME, *kw["name"].dropna().unique()])
 # Always a bool Series: on an empty frame map() returns object dtype, and frame[object Series] selects columns, not rows.
 en_mask = lambda col: col.map(is_en).astype(bool)
 kw = kw[en_mask(kw["kw"])]
+# The clusters prompt's negative keywords (pipeline negative_keywords.json): a keyword naming a competitor sits in no
+# cluster, whichever run made the clusters. Searches that served the CE's own ads keep their cluster.
+_neg = json.loads((ROOT / "negative_keywords.json").read_text())
+_neg_re = re.compile(r"\b(" + "|".join(re.escape(t) for t in dict.fromkeys(_neg["all"] + _neg.get("by_ce", {}).get(str(CFG.get("eos_id", CE) if CE != 189 else CE), []))) + r")\b")
+kw = kw[~kw["k"].str.contains(_neg_re)]
 # Misspellings of the CE's name (spelling.py) go to the cluster holding the right spelling, and a cluster made only of
 # them merges into it; MERGE re-points the search-term placements in assign(). They never become a focus keyword.
 fix_spelling = speller(CE_NAME, dict(zip(kw["k"], kw["vol"])))
@@ -679,6 +684,16 @@ if "conv" not in totals:
     vconv = pd.read_csv(ROOT / "snapshots" / "20261030_validation_v1" / "keyword_totals.csv", dtype={"ce": str})
     totals = totals.merge(vconv.loc[vconv["ce"] == str(CE), ["kw_key", "conv"]], on="kw_key", how="left")
 kw_text_cid = assign(KEYWORD_RUN).drop_duplicates("k").set_index("k")[COL]
+# The CE's searches bought by other campaigns (ces.json other_terms; Grand Canyon's by Las Vegas helicopter campaigns):
+# their visible English searches join the cluster each search is placed in. Only what the search terms report shows,
+# since those campaigns' keyword totals also cover searches about other things.
+_oth_file = OUT / f"other_campaign_terms_{CE}.csv"
+oth = pd.read_csv(_oth_file) if _oth_file.exists() and _oth_file.stat().st_size else pd.DataFrame(columns=["campaign_name", "term", "impr", "clicks", "spend", "conv", "conv_value"])
+oth = oth[en_mask(oth["term"])].assign(k=lambda d: d["term"].map(norm))
+oth["cid"] = oth["k"].map(pair_cid[COL]).fillna(oth["k"].map(kw_text_cid))
+OTH_METRICS = ["impr", "clicks", "spend", "conv", "conv_value"]
+oth_cid = oth.dropna(subset=["cid"]).groupby("cid")[OTH_METRICS].sum()
+oth_camp = oth.dropna(subset=["cid"]).groupby(["cid", "campaign_name"])["clicks"].sum()
 ads = pd.read_csv(SNAP / "ad_groups.csv").assign(ag=lambda d: d["ad_group_id"].astype(str)).drop_duplicates("ag").set_index("ag")
 # Search terms first: a keyword's totals cover every search it served in any language, so each keeps its English part,
 # in proportion to its visible searches (searches Google does not report are taken to follow the same mix). A keyword
@@ -979,6 +994,12 @@ for cid, meta in names.iterrows():
     sp = spread[spread["cid"] == cid]
     o = org_cid[org_cid[COL] == cid]
     clicks, spend, cm1, impr, conv = sp["clicks"].sum(), sp["spend"].sum(), sp["conv_value"].sum(), sp["impr"].sum(), sp["conv"].sum()
+    other = None
+    if cid in oth_cid.index:
+        x = oth_cid.loc[cid]
+        clicks, spend, cm1, impr, conv = clicks + x["clicks"], spend + x["spend"], cm1 + x["conv_value"], impr + x["impr"], conv + x["conv"]
+        other = {"clicks": r(x["clicks"]), "spend": r(x["spend"], 2), "cv": r(x["conv_value"], 2),
+                 "campaigns": [{"name": n, "clicks": r(v)} for n, v in oth_camp.loc[cid].sort_values(ascending=False).head(3).items()]}
     eligible = sp["eligible"].sum()
     top_kw = k.sort_values("vol", ascending=False)
     focus = pick_focus(top_kw, name, name == HEAD_NAME or "Head Term" in name)
@@ -1051,7 +1072,7 @@ for cid, meta in names.iterrows():
         "vol_total": r(k.assign(f=[fam_of(v, key) for v, key in zip(k["vol"].fillna(0), k["k"])]).groupby("f")["vol"].first().fillna(0).sum()) if len(k) else None,
         "vol_source": "eos", "focus_kw": top_kw["kw"].iloc[0] if len(top_kw) else None,
         "adg": own_ad_group(k, top_kw["kw"].iloc[0] if len(top_kw) else None),
-        "impr": r(impr), "clicks": r(clicks), "spend": r(spend, 2), "google_value": r(cm1, 2), "conv": r(conv, 1),
+        "impr": r(impr), "clicks": r(clicks), "spend": r(spend, 2), "google_value": r(cm1, 2), "conv": r(conv, 1), "other_campaigns": other,
         "paid_revenue": r(paid_rev.get(cid), 2), "n_ad_groups": int(len(ag)),
         "top_ad_group": ag["ad_group_name"].iloc[0] if len(ag) else None,
         "top_ag_purity": r(ag["share"].iloc[0], 3) if len(ag) else None,
@@ -1544,7 +1565,10 @@ else:
 # The header is the English searches' share of every keyword's totals, across all the CE's campaigns; the CE's whole
 # Google Ads total (every language, and clicks tied to no keyword) is kept beside it.
 paid_ce = {"clicks": r(totals["clicks"].sum()), "spend": r(totals["spend"].sum(), 2), "conv_value": r(totals["conv_value"].sum(), 2),
-           "from": "searches", "all": all_paid, "campaigns": int(pairs.loc[pairs["clicks"] > 0, "campaign_name"].nunique())}
+           "from": "searches", "all": all_paid, "campaigns": int(pairs.loc[pairs["clicks"] > 0, "campaign_name"].nunique()),
+           "other": {"clicks": r(oth_cid["clicks"].sum()), "spend": r(oth_cid["spend"].sum(), 2), "conv_value": r(oth_cid["conv_value"].sum(), 2),
+                     "unplaced_clicks": r(oth.loc[oth["cid"].isna(), "clicks"].sum()),
+                     "campaigns": int(oth.loc[oth["clicks"] > 0, "campaign_name"].nunique())} if len(oth) else None}
 ce.update({"search_terms_shown": r(st_shown, 3), "weeks": [str(w) for w in weeks], "weekly_mapped": r(wk_mapped, 3), "paid_clicks_mapped": r(div(mapped_paid_clicks, total_paid_clicks), 3), "organic_clicks_mapped": r(div(org_cid["clicks"].sum(), org["clicks"].sum()), 3),
            "home": HOME_PATH,
            # The CE's own Google Ads totals and live keywords, account-wide: the header reads these, not a sum over clusters

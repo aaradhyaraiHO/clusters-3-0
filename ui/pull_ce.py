@@ -39,7 +39,8 @@ def render(name, ce, cfg, collections="", experiences=""):
     site = re.sub(r"^www\.", "", host)
     sql = (TEMPLATES / f"{name}.sql").read_text()
     for token, value in {"__NAME__": cfg["name"], "__HOST__": host, "__SITE_RE__": site.replace(".", r"\."), "__SITE__": site,
-                         "__COLLECTIONS__": collections, "__EXPERIENCES__": experiences, "__CE__": ce, **window_tokens()}.items():
+                         "__COLLECTIONS__": collections, "__EXPERIENCES__": experiences, "__CE__": ce,
+                         "__OTHER_TERMS__": cfg.get("other_terms") or "", **window_tokens()}.items():
         sql = sql.replace(token, value)
     # A CE whose pages also sit on another site (Park Güell under barcelona-tickets.com/park-guell) lists those uid
     # prefixes in ces.json page_prefixes; Payload pages are read from its own host and from each of them.
@@ -100,6 +101,9 @@ def main():
                 prods = pd.read_csv(out("page_products"), dtype={"experience_id": str})
                 experiences = ",".join(sorted(prods["experience_id"].dropna().unique()))
         if only and name not in only:
+            continue
+        # Other campaigns' searches count only for a CE that names them (ces.json other_terms).
+        if name == "other_campaign_terms" and not cfg.get("other_terms"):
             continue
         run(name, render(name, a.ce, cfg, collections, experiences), out(name), env)
 

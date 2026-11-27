@@ -152,8 +152,11 @@ READ_ME = [["How to review"], [],
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--dry-run", metavar="DIR")
+    p.add_argument("--ces", help="comma-separated CE keys (ces.json); default every CE with a built page")
     a = p.parse_args()
     reg = json.loads((HERE / "ces.json").read_text())["ces"]
+    if a.ces:
+        reg = {k: reg[k] for k in a.ces.split(",")}
     manifest = PIPELINE / "prompts" / "eos" / "manifest.json"
     prompts_rev = json.loads(manifest.read_text()).get("synced_at", "")[:10] if manifest.exists() else "unknown"
     used, tabs, checks = {"Read me", "Checks"}, [], []
