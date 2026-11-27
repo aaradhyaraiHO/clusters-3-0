@@ -15,6 +15,8 @@ import numpy as np
 import pandas as pd
 from sentence_transformers import SentenceTransformer
 
+from own_pages import own_pages
+
 ROOT = Path(sys.argv[1])
 HERE = Path(__file__).resolve().parent
 CFG = json.loads((HERE / "ces.json").read_text())["ces"][sys.argv[2]]
@@ -33,7 +35,7 @@ strip = lambda t: " ".join(w for w in str(t).lower().replace("-", " ").split() i
 # Pages, mapped to clusters, with orders that landed on them.
 kw = pd.read_csv(SNAP / "cluster_keywords.csv")
 pages = pd.read_csv(OUT / f"pages_{CE}.csv", dtype={"collection_id": str})
-pages = pages[pages["status_en"] == "published"].copy()
+pages = own_pages(pages[pages["status_en"] == "published"].copy(), CE, HOST, OUT / f"entities_{CE}.csv")
 # A page's host: the CE's own, or another site that holds a section for it (ces.json page_prefixes).
 pages["host"] = pages["uid"].str.extract(r"^(www\.[a-z0-9-]+\.(?:co\.[a-z]{2}|com\.[a-z]{2}|[a-z]{2,3}))(?=\.|$)")[0].fillna(HOST)
 pages["path"] = [u[len(h):].replace(".", "/").strip("/") for u, h in zip(pages["uid"], pages["host"])]
@@ -50,7 +52,8 @@ head = kw.loc[(kw["name"] == CFG.get("head")) | kw["name"].str.contains("Head Te
 real = ~kw["name"].str.startswith("Other").to_numpy()
 pages["cid"], pages["how"] = None, None
 for i, (_, row) in enumerate(pages.iterrows()):
-    if row["page_type"] == "Theme":
+    # Only the CE's own home page is its head term's page; a child collection's Theme page maps by meaning.
+    if row["page_type"] == "Theme" and str(row["collection_id"]) == str(CE):
         pages.loc[row.name, ["cid", "how"]] = [head, "home"]
         continue
     s = np.where(real, sims[i], -1)

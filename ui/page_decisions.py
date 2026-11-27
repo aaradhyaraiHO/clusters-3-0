@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from own_pages import own_pages
+
 HERE = Path(__file__).resolve().parent
 ROOT = Path(sys.argv[1])
 KEY = sys.argv[2]
@@ -87,6 +89,7 @@ def main():
 
     pages_file = OUT / f"pages_{KEY}.csv"
     pg = pd.read_csv(pages_file, dtype=str) if pages_file.exists() else pd.DataFrame(columns=["uid"])
+    pg = own_pages(pg, KEY, HOST, OUT / f"entities_{KEY}.csv") if len(pg) else pg
     pg = pg[pg["page_type"] != "Trust"] if "page_type" in pg else pg
     pages = [{k: v for k, v in {"uid": x.uid, "pageType": x.page_type, "noIndex": str(x.any_noindex).lower() == "true", "url": page_url(x.uid),
                                 "status": "live" if x.status_en == "published" else x.status_en, "focusKeyword": x.focus_keyword_en,
